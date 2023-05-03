@@ -1,0 +1,16 @@
+version: "3.9"
+services:
+  mongo:
+    image: mongo
+    ports:
+      - 27018:27017
+    volumes:
+      - MATRIXDB_HOME/data:/data/db
+    restart: always
+  api:
+    depends_on:
+      - mongo
+    build: .
+    ports:
+      - 8000:8000
+    restart: always
