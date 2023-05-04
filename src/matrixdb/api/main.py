@@ -139,8 +139,8 @@ def get_biomolecule_interactors_by_id(id):
     all_partners = len(neighborhood.keys())
     return {
         "count" : len(neighborhood.keys()),
-        "count_3.5": parterns_from_matrixdb_3_5,
-        "count_intact_09_2022": all_partners,
+        "countMatrixdb": parterns_from_matrixdb_3_5,
+        "countIntact": all_partners - parterns_from_matrixdb_3_5,
         "direct": direct,
         "inferred": inferred,
         "interactors": neighborhood
