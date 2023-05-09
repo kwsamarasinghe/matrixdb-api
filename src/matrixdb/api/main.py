@@ -97,8 +97,8 @@ def get_biomolecule_interactors_by_id(id):
     neighborhood = {}
     direct = 0
     inferred = 0
-    for biomolecule in associations["associations"]:
-        association = associations["associations"][biomolecule]
+    for association_id in associations["associations"]:
+        association = associations["associations"][association_id]
         if len(association["directlysupportedby"]) > 0 or len(association["spokeexpandedfrom"]) > 0:
             direct = direct + 1
         #if len(association["inferredfrom"]) > 0:
@@ -106,6 +106,7 @@ def get_biomolecule_interactors_by_id(id):
             inferred = inferred + 1
 
         neighborhood[association["partner"]] = {
+            "association" : association_id,
             "directlysupportedby" : association["directlysupportedby"],
             "spokeexpandedfrom" : association["spokeexpandedfrom"],
             "inferredfrom" : association["inferredfrom"]
@@ -123,10 +124,11 @@ def get_biomolecule_interactors_by_id(id):
         }
     )
     if intact_associations is not None:
-        for biomolecule in intact_associations["associations"]:
-            intact_association = intact_associations["associations"][biomolecule]
+        for association_id in intact_associations["associations"]:
+            intact_association = intact_associations["associations"][association_id]
             if intact_association["partner"] not in neighborhood:
                 neighborhood[intact_association["partner"]] = {}
+                neighborhood[intact_association["partner"]]["association"] = association_id
                 neighborhood[intact_association["partner"]]["direct_from_intact"] = []
                 neighborhood[intact_association["partner"]]["direct_from_intact"] = intact_association["directlysupportedby"]
             else:
@@ -150,7 +152,10 @@ def get_biomolecule_interactors_by_id(id):
 def get_association_by_id(id):
     association = database["associations"].find_one(
         {
-            "id": id
+            "id": {
+                "$regex": id,
+                "$options": "i"
+            }
         },
         {
             "_id": 0
