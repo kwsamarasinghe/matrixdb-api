@@ -1,3 +1,4 @@
+import re
 import traceback
 
 from flask import Flask, request, Response
@@ -10,6 +11,8 @@ import pandas as pd
 import json
 from functools import reduce
 from itertools import groupby
+
+from src.matrixdb.utils.solr.solr_query_controller import query_solr
 
 config = {
     "DEBUG": True,          # some Flask specific configs
@@ -32,8 +35,6 @@ def build_biomolecule_registry():
     for biomolecule in database["biomolecules"].find():
         biomolecules.append(biomolecule["id"])
 
-    for biomolecule in database["biomolecules_missing"].find():
-        biomolecules.append(biomolecule["id"])
     return sorted(biomolecules)
 
 
@@ -61,21 +62,10 @@ def get_biomolecules_by_id():
         "_id": False
     }))
 
-    biomolecules_from_missing = list(database["biomolecules_new"].find({
-        "id": {
-            "$in": biomoelcule_ids
-        }
-    },
-        {
-            "_id": False
-        }))
-    if len(biomolecules_from_missing) > 0:
-        biomolecules.append(biomolecules_from_missing)
-
     for biomolecule in biomolecules:
         if biomolecule["type"] == 'protein':
 
-            expressions_by_protein = database["proteinExpression"].find_one({
+            expressions_by_protein = database["geneExpression"].find_one({
                 "uniprot": biomolecule["id"]
             })
 
@@ -85,8 +75,14 @@ def get_biomolecules_by_id():
 
             gene_expressions = list()
             if expressions_by_protein is not None:
-                filtered_expression = filter(lambda e: "life cycle" in e["sex"], expressions_by_protein["expressions"])
-                grouped_expressions = groupby(sorted(list(filtered_expression), key=lambda x: x["uberonName"]), key=lambda x: x["uberonName"])
+
+                expression_values = list()
+                for expression in expressions_by_protein["expressions"]:
+                    for e in list(expression.values()):
+                        expression_values.append(e[0])
+
+                #filtered_expression = filter(lambda e: "life cycle" in e["sex"], expressions_by_protein["expressions"])
+                grouped_expressions = groupby(sorted(list(expression_values), key=lambda x: x["uberonName"]), key=lambda x: x["uberonName"])
 
                 for tissue_uberon_name, group in grouped_expressions:
                     max_group = max(group, key=lambda x: x["tpm"])
@@ -114,7 +110,7 @@ def get_biomolecules_by_id():
 
 @app.route('/api/biomolecules/<id>/interactors/', methods=['GET'])
 def get_biomolecule_interactors_by_id(id):
-    interactions = list(database["interactions_new"].find(
+    interactions = list(database["interactions"].find(
         {
             "participants": id
         },
@@ -125,11 +121,11 @@ def get_biomolecule_interactors_by_id(id):
 
     neighborhood = {}
     direct = 0
+    predictions = 0
     inferred = 0
     publications = set()
     if len(interactions) > 0:
         for interaction in interactions:
-            publications.add(interaction["pubmed"])
             participant_ids = interaction["participants"]
             participant_ids.remove(id)
             partner = participant_ids[0]
@@ -137,21 +133,30 @@ def get_biomolecule_interactors_by_id(id):
                 neighborhood[partner] = {}
                 neighborhood[partner]["association"] = interaction["id"]
 
-            if "spoke_expanded_from" in interaction:
-                if "spoke_expanded_from" not in neighborhood[partner]:
-                    neighborhood[partner]["spokeExpandedFrom"] = list()
-                direct += interaction["spoke_expanded_from"]
-                neighborhood[partner]["spokeExpandedFrom"].extend(interaction["spoke_expanded_from"])
-            else:
-                if "directly_supported_by" not in neighborhood[partner]:
-                    neighborhood[partner]["directlySupportedBy"] = list()
-                direct += len(interaction["experiments"])
-                neighborhood[partner]["directlySupportedBy"].extend(interaction["experiments"])
+            if "experiments" in interaction:
+                if "spoke_expanded_from" in interaction["experiments"]["direct"]:
+                    if "spoke_expanded_from" not in neighborhood[partner]:
+                        neighborhood[partner]["spokeExpandedFrom"] = list()
+                    neighborhood[partner]["spokeExpandedFrom"].extend(interaction["experiments"]["direct"]["spoke_expanded_from"])
+                    direct += 1
+
+                if "binary" in interaction["experiments"]["direct"]:
+                    if "directly_supported_by" not in neighborhood[partner]:
+                        neighborhood[partner]["directlySupportedBy"] = list()
+                    neighborhood[partner]["directlySupportedBy"].extend(interaction["experiments"]["direct"]["binary"])
+                    direct += 1
+
+            if "prediction" in interaction:
+                if "predictions" not in neighborhood[partner]:
+                    neighborhood[partner]["predictions"] = list()
+                neighborhood[partner]["predictions"].append(partner)
+                predictions += 1
 
     print()
     return {
         "count": len(neighborhood.keys()),
         "direct": direct,
+        "predictions": predictions,
         "inferred": 0,
         "details": neighborhood,
         "publications": list(publications)
@@ -166,7 +171,7 @@ def get_protein_expression(id):
         "id": id
     })
 
-    expressions_by_protein = database["proteinExpression"].find_one({
+    expressions_by_protein = database["geneExpression"].find_one({
         "uniprot": id
     })
 
@@ -176,8 +181,14 @@ def get_protein_expression(id):
 
     gene_expressions = list()
     if expressions_by_protein is not None:
-        filtered_expression = filter(lambda e: "life cycle" in e["sex"], expressions_by_protein["expressions"])
-        grouped_expressions = groupby(sorted(list(filtered_expression), key=lambda x: x["uberonName"]),
+
+        expression_values = list()
+        for expression in expressions_by_protein["expressions"]:
+            for e in list(expression.values()):
+                expression_values.append(e[0])
+
+        # filtered_expression = filter(lambda e: "life cycle" in e["sex"], expressions_by_protein["expressions"])
+        grouped_expressions = groupby(sorted(list(expression_values), key=lambda x: x["uberonName"]),
                                       key=lambda x: x["uberonName"])
 
         for tissue_uberon_name, group in grouped_expressions:
@@ -187,25 +198,15 @@ def get_protein_expression(id):
                 "tpm": max_group["tpm"]
             })
 
-    prot_expressions = {}
+    prot_expressions = list()
     if proteomics_expression_by_protein is not None:
         for e in proteomics_expression_by_protein["expressions"]:
-            if "sampleName" in e:
-                sample_name = e["sampleName"]
-                sample = e["sample"]
-                tissue_id = e["tissueId"]
-                score = e["confidenceScore"]
-
-                if tissue_id not in prot_expressions:
-                    prot_expressions[tissue_id] = {
-                        "expressionValues": []
-                    }
-
-                prot_expressions[tissue_id]["expressionValues"].append({
-                    "tissueId": tissue_id,
-                    "score": score,
-                    "name": sample_name,
-                    "sample": sample,
+            prot_expressions.append(
+                {
+                    "tissueId": e["tissueId"],
+                    "name": e["sampleName"] if "sampleName" in e else "",
+                    "sample": e["sample"] if "sample" in e else "",
+                    "score": e["confidenceScore"] if "confidenceScore" in e else 0,
                 })
 
     return {
@@ -221,7 +222,7 @@ def get_protein_expression(id):
 def get_associations_by_biomolecules():
     try:
         biomolecule_ids = json.loads(request.data)["biomolecules"]
-        interactions = list(database["interactions_new"].find(
+        interactions = list(database["interactions"].find(
             {
                 "participants": {
                     "$in": biomolecule_ids
@@ -250,7 +251,7 @@ def get_associations_by_biomolecules():
         for p in participants:
             unique_participants[p["id"]] = p
 
-        for expression in list(database["proteinExpression"].find(
+        for expression in list(database["proteomicsExpression"].find(
             {
                 "uniprot": {
                     "$in": list(key for key in unique_participants)
@@ -281,7 +282,7 @@ def get_associations_by_biomolecules():
 
 @app.route('/api/associations/<id>', methods=['GET'])
 def get_association_by_id(id):
-    association = database["interactions_new"].find_one(
+    association = database["interactions"].find_one(
         {
             "id": id
         },
@@ -364,7 +365,7 @@ def get_xrefs_by_ids():
 
     return json.dumps(list(xrefs))
 
-
+'''
 @app.route('/api/search', methods=['GET'])
 @cache.cached(timeout=50000, query_string=True)
 def search_with_text():
@@ -455,7 +456,37 @@ def search_with_text():
         results.append(result)
 
     return json.dumps(results)
+'''
 
+@app.route('/api/search', methods=['GET'])
+@cache.cached(timeout=50000, query_string=True)
+def search_with_text_solr():
+    args = request.args
+    search_text = args['text']
+
+    biomolecules_core_url = 'http://localhost:8983/solr/biomolecules'
+    publications_core_url = 'http://localhost:8983/solr/publications'
+
+    biomolecule_query_params = {
+        'q': '*:*',
+        'qf': 'biomolecule_id^10.0 name^5 common_name^4 recommended_name^3 description^2 keywords',
+        'fq': f'biomolecule_id:*{search_text}* OR name:*{search_text}* OR common_name:*{search_text}* OR '
+              f'recommended_name:*{search_text}* OR description:*{search_text}* OR keywords:*{search_text}*'
+    }
+    biomolecule_solr_docs = query_solr(biomolecules_core_url, biomolecule_query_params)
+
+    publication_query_params = {
+        'q': '*:*',
+        #'bf': 'publication_id^2.0 title^1.5',
+        'fq': f'publication_id:*{search_text}* OR title:*{search_text}* OR abstract:*{search_text}* OR '
+              f'journal:*{search_text}* OR authors:*{search_text}*'
+    }
+    publication_solr_docs = query_solr(publications_core_url, publication_query_params)
+
+    return json.dumps({
+        "biomolecules": biomolecule_solr_docs,
+        "publications": publication_solr_docs
+    })
 
 def convert_name(name):
     if len(name.split('_')) > 0:
@@ -463,163 +494,20 @@ def convert_name(name):
     else:
         return name
 
-@app.route('/api/statistics/associations', methods=['GET'])
-@cache.cached(timeout=50000)
-def get_interaction_stats():
-    associations = database["interactions_new"].find({})
+@app.route('/api/statistics/', methods=['GET'])
+def get_stats():
+    statistics = list(database["statistics"].find())
+    statistics_reply = dict()
+    for statistic in statistics:
+        if statistic["category"] == "biomolecule_counts":
+            statistics_reply["biomolecules"] = statistic["statistics"]
 
-    associations_by_biomolecule_type = {}
-    associations_by_biomolecule_type["protein"] = {}
-    associations_by_biomolecule_type["protein"]["protein"] = 0
-    associations_by_biomolecule_type["protein"]["multimer"] = 0
-    associations_by_biomolecule_type["protein"]["gag"] = 0
-    associations_by_biomolecule_type["protein"]["pfrag"] = 0
-    associations_by_biomolecule_type["multimer"]  = {}
-    associations_by_biomolecule_type["multimer"]["multimer"] = 0
-    associations_by_biomolecule_type["multimer"]["pfrag"] = 0
-    associations_by_biomolecule_type["multimer"]["gag"] = 0
-    associations_by_biomolecule_type["pfrag"] = {}
-    associations_by_biomolecule_type["pfrag"]["pfrag"] = 0
-    associations_by_biomolecule_type["pfrag"]["gag"] = 0
-    associations_by_biomolecule_type["gag"] = {}
-    associations_by_biomolecule_type["gag"]["gag"] = 0
+        if statistic["category"] == "interaction_counts":
+            statistics_reply["interactions"] = statistic["statistics"]
 
-    # Same association is duplicated as to distinguish the experiments
-    # Furthermore, there can be symmetric form of the association
-    # Need to get the unique biomolecule pairs removing the symmetry and then count
-
-    sorted_associations = set()
-    all_assoc = 0
-    for association in list(associations):
-        all_assoc+= 1
-        if "inferred_from" in association and len(association["inferred_from"]) > 0:
-            continue
-
-        biomolecules = association["biomolecules"]
-        if len(biomolecules) > 1:
-            if biomolecules[0] > biomolecules[1]:
-                sorted_associations.add((biomolecules[1], biomolecules[0], association["id"]))
-            else:
-                sorted_associations.add((biomolecules[0], biomolecules[1], association["id"]))
-        else:
-            sorted_associations.add((biomolecules[0],association["id"]))
-
-    print("All assoc " + str(all_assoc))
-    print("sorted " + str(len(sorted_associations)))
-    # Count associations by biomolecule pairs, i.e protein - protein, protein - gag , etc
-    biomol_cache = {}
-    all_exp_supported = 0
-    for biomolecules in list(sorted_associations):
-
-        if len(biomolecules) > 2:
-            interactant1 = biomolecules[0]
-            interactant2 = biomolecules[1]
-            association_id = biomolecules[2]
-        else:
-            interactant1 = biomolecules[0]
-            interactant2 = biomolecules[0]
-            association_id = biomolecules[1]
-
-        if interactant1 not in biomol_cache:
-            biomolecule = database["cleaned_biomolecules"].find_one({
-                "id": interactant1
-            })
-            if biomolecule is None:
-                #print("No biomol " + " " + interactant1)
-                continue
-            interactant1_type = biomolecule["type"].lower()
-            if interactant1_type is None:
-                print("No type? " + interactant1)
-            biomol_cache[interactant1] = interactant1_type
-        else:
-            interactant1_type = biomol_cache[interactant1].lower()
-            if interactant1_type is None:
-                print("No type?" + interactant1)
-
-        if interactant2 not in biomol_cache:
-            biomolecule = database["cleaned_biomolecules"].find_one({
-                "id": interactant2
-            })
-            if biomolecule is None:
-                #print("No biomol "  + interactant2)
-                continue
-            interactant2_type = biomolecule["type"].lower()
-            if interactant2_type is None:
-                print("No type " + interactant2)
-            biomol_cache[interactant2] = interactant2_type
-        else:
-            interactant2_type = biomol_cache[interactant2].lower()
-            if interactant2_type is None:
-                print("No type " + interactant2)
-
-        all_exp_supported += 1
-        if "protein" in interactant1_type and "protein" in interactant2_type:
-            print(interactant1 + "," + interactant2+"," + association_id +",protein-protien")
-            associations_by_biomolecule_type["protein"]["protein"] += 1
-
-        elif "protein" in interactant1_type and "gag" in interactant2_type:
-            print(interactant1 + "," + interactant2+",protein-gag")
-            associations_by_biomolecule_type["protein"]["gag"] += 1
-
-        elif "gag" in interactant1_type and "protein" in interactant2_type:
-            print(interactant1 + "," + interactant2+",gag-protien")
-            associations_by_biomolecule_type["protein"]["gag"] += 1
-
-        elif "protein" in interactant1_type and "mult" in interactant2_type:
-            print(interactant1 + "," + interactant2+",protein-mult")
-            associations_by_biomolecule_type["protein"]["multimer"] += 1
-
-        elif 'mult' in interactant1_type and "protein" in interactant2_type:
-            print(interactant1 + "," + interactant2+",mult-protine")
-            associations_by_biomolecule_type["protein"]["multimer"] += 1
-
-        elif "protein" in interactant1_type and "pfrag" in interactant2_type:
-            print(interactant1 + "," + interactant2+",protein-pfrag")
-            associations_by_biomolecule_type["protein"]["pfrag"] += 1
-
-        elif "pfrag" in interactant1_type and "protein" in interactant2_type:
-            print(interactant1 + "," + interactant2+",pfrag-protine")
-            associations_by_biomolecule_type["protein"]["pfrag"] += 1
-
-        elif "mult" in interactant1_type and "mult" in interactant2_type:
-            print(interactant1 + "," + interactant2+",mult-mult")
-            associations_by_biomolecule_type["multimer"]["multimer"] += 1
-
-        elif "mult" in interactant1_type and "pfrag" in interactant2_type:
-            print(interactant1 + "," + interactant2+",mult-pfrag")
-            associations_by_biomolecule_type["multimer"]["pfrag"] += 1
-
-        elif "pfrag" in interactant1_type and "mult" in interactant2_type:
-            print(interactant1 + "," + interactant2+",pfrag-mult")
-            associations_by_biomolecule_type["multimer"]["pfrag"] += 1
-
-        elif "mult" in interactant1_type and "gag" in interactant2_type:
-            print(interactant1 + "," + interactant2+",mult-gag")
-            associations_by_biomolecule_type["multimer"]["gag"] += 1
-
-        elif "gag" in interactant1_type and "mult" in interactant2_type:
-            print(interactant1 + "," + interactant2+",gag-mult")
-            associations_by_biomolecule_type["multimer"]["gag"] += 1
-
-        elif "pfrag" in interactant1_type and "pfrag" in interactant2_type:
-            print(interactant1 + "," + interactant2+",pfrag-pfrag")
-            associations_by_biomolecule_type["pfrag"]["pfrag"] += 1
-
-        elif "pfrag" in interactant1_type and "gag" in interactant2_type:
-            print(interactant1 + "," + interactant2+",pfrag-gag")
-            associations_by_biomolecule_type["pfrag"]["gag"] += 1
-
-        elif "gag" in interactant1_type and "pfrag" in interactant2_type:
-            print(interactant1 + "," + interactant2+",gag-pfrag")
-            associations_by_biomolecule_type["pfrag"]["gag"] += 1
-
-        elif "gag" in interactant1_type and "gag" in interactant2_type:
-            print(interactant1 + "," + interactant2+",gag-gag")
-            associations_by_biomolecule_type["gag"]["gag"] += 1
-
-    return json.dumps({
-        "associations": associations_by_biomolecule_type
-    })
+        if statistic["category"] == "experiment_counts":
+            statistics_reply["experiments"] = statistic["statistics"]
+    return json.dumps(statistics_reply)
 
 
 @app.route('/api/statistics/biomolecules', methods=['GET'])
@@ -772,7 +660,7 @@ def get_biomolcules_suggestions(search_query):
     if index is not None:
         biomolecules_found = biomolecule_registry[index + 1:index + 11]
         return {
-            "suggestions": biomolecules_found
+            "suggestions": list(b.strip('"') for b in biomolecules_found)
         }
     else:
         return {
@@ -791,17 +679,29 @@ def generate_network():
     for biomolecule in biomolecules:
         participants.add(biomolecule)
 
-        interactions = database["interactions_new"].find({
+        interactions = database["interactions"].find({
             "participants": biomolecule
         })
         for interaction in interactions:
-            if interaction["id"] == "GAG_2__P08581":
-                print()
-            associations.append({
+
+            association = {
                 "id": interaction["id"],
                 "participants": interaction["participants"],
-                "experiments": interaction["experiments"]
-            })
+            }
+
+            if "score" in interaction:
+                intact_miscore_match = re.search(r'intact-miscore:(\S+)', interaction["score"])
+                intact_miscore = float(intact_miscore_match.group(1)) if intact_miscore_match else None
+                association["score"] = str(intact_miscore)
+
+            if "experiments" in interaction:
+                association["experiments"] = interaction["experiments"]
+
+            if "prediction" in interaction:
+                association["prediction"] = True
+
+            associations.append(association)
+
             if biomolecule not in neighbors_by_biomolecule:
                 neighbors_by_biomolecule[biomolecule] = set()
 
@@ -816,17 +716,24 @@ def generate_network():
         common_neighbors = reduce(lambda x, y: x.intersection(y), list(neighbors_by_biomolecule.values()),
                                   list(neighbors_by_biomolecule.values())[0])
 
-        interactions = database["interactions_new"].find({
+        interactions = database["interactions"].find({
             "participants": {
                 "$in": list(common_neighbors)
             }
         })
         for interaction in interactions:
-            associations.append({
+            association = {
                 "id": interaction["id"],
                 "participants": interaction["participants"],
-                "experiments": interaction["experiments"]
-            })
+            }
+
+            if "experiments" in interaction:
+                association["experiments"] = interaction["experiments"]
+
+            if "prediction" in interaction:
+                association["prediction"] = True
+
+            associations.append(association)
             for participant in interaction["participants"]:
                 participants.add(participant)
 
@@ -848,7 +755,7 @@ if __name__ == '__main__':
     datasets = {}
     try:
         database_client = MongoClient(database_url)
-        database = database_client["matrixdb-pre-prod"]
+        database = database_client["matrixdb-4_0-pre-prod"]
     except Exception:
         print("Problem connecting to db " + database_url)
 
