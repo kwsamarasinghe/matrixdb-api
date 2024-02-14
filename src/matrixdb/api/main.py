@@ -2,9 +2,8 @@ import re
 import traceback
 
 from flask import Flask, request, Response
-from flask import Flask
 from flask_caching import Cache
-from flask_cors import CORS, cross_origin
+
 from gevent.pywsgi import WSGIServer
 from pymongo import MongoClient
 import pandas as pd
@@ -27,6 +26,12 @@ cache = Cache(app)
 
 database = None
 biomolecule_registry = list()
+meta_data_cache = {
+    "psimi": dict(),
+    "go": dict(),
+    "interpro": dict(),
+    "uniprotKeywords": dict()
+}
 
 
 # Build biomolecule registry
@@ -38,6 +43,24 @@ def build_biomolecule_registry():
     return sorted(biomolecules)
 
 
+def build_meta_data_cache():
+    # psimi
+    for psimi in database["psimi"].find():
+        meta_data_cache["psimi"][psimi["id"]] = psimi
+
+    # go
+    for go in database["go"].find():
+        meta_data_cache["go"][go["id"]] = go
+
+    # Interpro
+    for interpro in database["interpro"].find():
+        meta_data_cache["interpro"][interpro["id"]] = interpro
+
+    # Uniprot keywords
+    for uniprot_keyword in database["uniprotKeywords"].find():
+        meta_data_cache["uniprotKeywords"][uniprot_keyword["id"]] = uniprot_keyword
+
+
 @app.route('/api/biomolecules/<id>', methods=['GET'])
 @cache.cached(timeout=50000, query_string=True)
 def get_biomolecule_by_id(id):
@@ -47,6 +70,44 @@ def get_biomolecule_by_id(id):
     {
         "_id": False
     })
+
+    # Include GO, uniprot keyword and interpro definitions
+    if "go" in biomolecule["annotations"]:
+        go_terms = list()
+        for go in biomolecule["annotations"]["go"]:
+            go = {
+                "id": go,
+                "term": meta_data_cache["go"][go]["term"],
+                "definition": meta_data_cache["go"][go]["description"],
+                "category": meta_data_cache["go"][go]["category"]
+            }
+            go_terms.append(go)
+        biomolecule["annotations"]["go"] = go_terms
+
+    if biomolecule["type"] == 'protein':
+        keywords = list()
+        if "keywords" in biomolecule["annotations"]:
+            for keyword in biomolecule["annotations"]["keywords"]:
+                keyword = {
+                    "id": keyword,
+                    "definition": meta_data_cache["uniprotKeywords"][keyword]["definition"],
+                    "term": meta_data_cache["uniprotKeywords"][keyword]["name"]
+                }
+                keywords.append(keyword)
+            biomolecule["annotations"]["keywords"] = keywords
+
+        if "interpro" in biomolecule["xrefs"]:
+            if biomolecule["xrefs"]["interpro"]:
+                interpro_terms = list()
+                for interpro in biomolecule["xrefs"]["interpro"]:
+                    if 'IPR' in interpro:
+                        if interpro in meta_data_cache["interpro"]:
+                            interpro_terms.append({
+                                'id': meta_data_cache["interpro"][interpro]["id"],
+                                'name': meta_data_cache["interpro"][interpro]["name"]
+                            })
+                biomolecule["xrefs"]["interpro"] = interpro_terms
+
     return Response(json.dumps(biomolecule), mimetype='application/json')
 
 
@@ -81,7 +142,6 @@ def get_biomolecules_by_id():
                     for e in list(expression.values()):
                         expression_values.append(e[0])
 
-                #filtered_expression = filter(lambda e: "life cycle" in e["sex"], expressions_by_protein["expressions"])
                 grouped_expressions = groupby(sorted(list(expression_values), key=lambda x: x["uberonName"]), key=lambda x: x["uberonName"])
 
                 for tissue_uberon_name, group in grouped_expressions:
@@ -120,7 +180,7 @@ def get_biomolecule_interactors_by_id(id):
     ))
 
     neighborhood = {}
-    direct = 0
+    direct = set()
     predictions = 0
     inferred = 0
     publications = set()
@@ -128,6 +188,8 @@ def get_biomolecule_interactors_by_id(id):
         for interaction in interactions:
             participant_ids = interaction["participants"]
             participant_ids.remove(id)
+            if len(participant_ids) == 0:
+                continue
             partner = participant_ids[0]
             if partner not in neighborhood:
                 neighborhood[partner] = {}
@@ -138,13 +200,15 @@ def get_biomolecule_interactors_by_id(id):
                     if "spoke_expanded_from" not in neighborhood[partner]:
                         neighborhood[partner]["spokeExpandedFrom"] = list()
                     neighborhood[partner]["spokeExpandedFrom"].extend(interaction["experiments"]["direct"]["spoke_expanded_from"])
-                    direct += 1
+                    for se in interaction["experiments"]["direct"]["spoke_expanded_from"]:
+                        direct.add(se)
 
                 if "binary" in interaction["experiments"]["direct"]:
                     if "directly_supported_by" not in neighborhood[partner]:
                         neighborhood[partner]["directlySupportedBy"] = list()
                     neighborhood[partner]["directlySupportedBy"].extend(interaction["experiments"]["direct"]["binary"])
-                    direct += 1
+                    for b in interaction["experiments"]["direct"]["binary"]:
+                        direct.add(b)
 
             if "prediction" in interaction:
                 if "predictions" not in neighborhood[partner]:
@@ -155,7 +219,7 @@ def get_biomolecule_interactors_by_id(id):
     print()
     return {
         "count": len(neighborhood.keys()),
-        "direct": direct,
+        "direct": len(direct),
         "predictions": predictions,
         "inferred": 0,
         "details": neighborhood,
@@ -163,58 +227,69 @@ def get_biomolecule_interactors_by_id(id):
     }
 
 
-@app.route('/api/biomolecules/proteins/expressions/<id>', methods=['GET'])
+@app.route('/api/biomolecules/proteins/expressions/', methods=['POST'])
 #@cache.cached(timeout=50000, query_string=True)
-def get_protein_expression(id):
+def get_protein_expression():
+    database_url = "mongodb://localhost:27018/"
+    try:
+        database_client = MongoClient(database_url)
+        database = database_client["matrixdb-4_0-pre-prod"]
+    except Exception:
+        print("Problem connecting to db " + database_url)
 
-    protein = database["biomolecules"].find_one({
-        "id": id
+    protein_ids = json.loads(request.data)
+    proteins = database["biomolecules"].find({
+        "id": {
+            '$in': protein_ids
+        }
     })
 
-    expressions_by_protein = database["geneExpression"].find_one({
-        "uniprot": id
-    })
+    expression_data = dict()
+    for protein in proteins:
+        expressions_by_protein = database["geneExpression"].find_one({
+            "uniprot": protein['id']
+        })
 
-    proteomics_expression_by_protein = database["proteomicsExpressions"].find_one({
-        "uniprot": id
-    })
+        proteomics_expression_by_protein = database["proteomicsExpressions"].find_one({
+            "uniprot": protein['id']
+        })
 
-    gene_expressions = list()
-    if expressions_by_protein is not None:
+        gene_expressions = list()
+        if expressions_by_protein is not None:
 
-        expression_values = list()
-        for expression in expressions_by_protein["expressions"]:
-            for e in list(expression.values()):
-                expression_values.append(e[0])
+            expression_values = list()
+            for expression in expressions_by_protein["expressions"]:
+                for e in list(expression.values()):
+                    expression_values.append(e[0])
 
-        # filtered_expression = filter(lambda e: "life cycle" in e["sex"], expressions_by_protein["expressions"])
-        grouped_expressions = groupby(sorted(list(expression_values), key=lambda x: x["uberonName"]),
-                                      key=lambda x: x["uberonName"])
+            # filtered_expression = filter(lambda e: "life cycle" in e["sex"], expressions_by_protein["expressions"])
+            grouped_expressions = groupby(sorted(list(expression_values), key=lambda x: x["uberonName"]),
+                                          key=lambda x: x["uberonName"])
 
-        for tissue_uberon_name, group in grouped_expressions:
-            max_group = max(group, key=lambda x: x["tpm"])
-            gene_expressions.append({
-                "tissueUberonName": tissue_uberon_name.strip('"'),
-                "tpm": max_group["tpm"]
-            })
-
-    prot_expressions = list()
-    if proteomics_expression_by_protein is not None:
-        for e in proteomics_expression_by_protein["expressions"]:
-            prot_expressions.append(
-                {
-                    "tissueId": e["tissueId"],
-                    "name": e["sampleName"] if "sampleName" in e else "",
-                    "sample": e["sample"] if "sample" in e else "",
-                    "score": e["confidenceScore"] if "confidenceScore" in e else 0,
+            for tissue_uberon_name, group in grouped_expressions:
+                max_group = max(group, key=lambda x: x["tpm"])
+                gene_expressions.append({
+                    "tissueUberonName": tissue_uberon_name.strip('"'),
+                    "tpm": max_group["tpm"]
                 })
 
-    return {
-        "protein": id,
-        "gene": protein["relations"]["gene_name"] if "gene_name" in protein["relations"] else None,
-        "geneExpression": gene_expressions,
-        "proteomicsExpression": prot_expressions
-    }
+        prot_expressions = list()
+        if proteomics_expression_by_protein is not None:
+            for e in proteomics_expression_by_protein["expressions"]:
+                prot_expressions.append(
+                    {
+                        "tissueId": e["tissueId"],
+                        "name": e["sampleName"] if "sampleName" in e else "",
+                        "sample": e["sample"] if "sample" in e else "",
+                        "score": e["confidenceScore"] if "confidenceScore" in e else 0,
+                    })
+
+        expression_data[protein['id']] ={
+            "gene": protein["relations"]["gene_name"] if protein is not None and "gene_name" in protein["relations"] else None,
+            "geneExpression": gene_expressions,
+            "proteomicsExpression": prot_expressions
+        }
+    return expression_data
 
 
 @app.route('/api/associations/', methods=['POST'])
@@ -304,7 +379,7 @@ def get_association_by_id(id):
 
 @app.route('/api/experiments/<id>', methods=['GET'])
 def get_experiments_by_id(id):
-    experiments = database["experiments_new"].find_one(
+    experiments = database["experiments"].find_one(
         {
             "id": id
         },
@@ -459,7 +534,6 @@ def search_with_text():
 '''
 
 @app.route('/api/search', methods=['GET'])
-@cache.cached(timeout=50000, query_string=True)
 def search_with_text_solr():
     args = request.args
     search_text = args['text']
@@ -671,11 +745,12 @@ def get_biomolcules_suggestions(search_query):
 @app.route('/api/networks', methods=['POST'])
 def generate_network():
     biomolecules = json.loads(request.data)["biomolecules"]
-    # Get the associations of biomolecuels
+    # Get the associations of biomolecules
     neighbors_by_biomolecule = dict()
     associations = list()
     participants = set()
 
+    network_participants = set()
     for biomolecule in biomolecules:
         participants.add(biomolecule)
 
@@ -688,11 +763,11 @@ def generate_network():
                 "id": interaction["id"],
                 "participants": interaction["participants"],
             }
+            for p in interaction["participants"]:
+                network_participants.add(p)
 
             if "score" in interaction:
-                intact_miscore_match = re.search(r'intact-miscore:(\S+)', interaction["score"])
-                intact_miscore = float(intact_miscore_match.group(1)) if intact_miscore_match else None
-                association["score"] = str(intact_miscore)
+                association["score"] = str(interaction["score"])
 
             if "experiments" in interaction:
                 association["experiments"] = interaction["experiments"]
@@ -737,10 +812,26 @@ def generate_network():
             for participant in interaction["participants"]:
                 participants.add(participant)
 
+    # Existing biomolecules
+    existing_biomolecules = list(database["biomolecules"].find({
+        'id': {
+           '$in': list(network_participants)
+        }
+    }))
+    missing_biomolecules = network_participants.difference(set(e["id"] for e in existing_biomolecules))
+
     # Remove duplicates, must be fixed in data
     unique_associations = dict()
     for association in associations:
-        unique_associations[association["id"]] = association
+        assoc_participants = association['participants']
+        should_include = True
+        for p in assoc_participants:
+            if p not in missing_biomolecules:
+                should_include &= True
+            else:
+                should_include &= False
+        if should_include:
+            unique_associations[association["id"]] = association
 
     return json.dumps({
         "associations": list(unique_associations.values()),
@@ -755,12 +846,15 @@ if __name__ == '__main__':
     datasets = {}
     try:
         database_client = MongoClient(database_url)
-        database = database_client["matrixdb-4_0-pre-prod"]
+        database = database_client["matrixdb_4_0"]
     except Exception:
         print("Problem connecting to db " + database_url)
 
     print("Building biomolecule registry")
     biomolecule_registry = build_biomolecule_registry()
+
+    print("Building meta data cache")
+    build_meta_data_cache()
 
     # Serve the src with gevent
     http_server = WSGIServer(('127.0.0.1', 8000), app)
