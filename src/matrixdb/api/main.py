@@ -11,6 +11,7 @@ import json
 from functools import reduce
 from itertools import groupby
 
+from src.matrixdb.interactome.network_manager import NetworkManager
 from src.matrixdb.utils.solr.solr_query_controller import query_solr
 
 config = {
@@ -22,7 +23,6 @@ config = {
 app = Flask(__name__)
 app.config.from_mapping(config)
 cache = Cache(app)
-#CORS(app, support_credentials=True)
 
 database = None
 biomolecule_registry = list()
@@ -30,7 +30,9 @@ meta_data_cache = {
     "psimi": dict(),
     "go": dict(),
     "interpro": dict(),
-    "uniprotKeywords": dict()
+    "uniprotKeywords": dict(),
+    "uberon": dict(),
+    "bto": dict()
 }
 
 
@@ -60,6 +62,12 @@ def build_meta_data_cache():
     for uniprot_keyword in database["uniprotKeywords"].find():
         meta_data_cache["uniprotKeywords"][uniprot_keyword["id"]] = uniprot_keyword
 
+    for uberon in database["uberon"].find():
+        meta_data_cache["uberon"][uberon["id"]] = uberon
+
+    for bto in database["brenda"].find():
+        meta_data_cache["bto"][bto["id"]] = bto
+
 
 @app.route('/api/biomolecules/<id>', methods=['GET'])
 @cache.cached(timeout=50000, query_string=True)
@@ -72,7 +80,7 @@ def get_biomolecule_by_id(id):
     })
 
     # Include GO, uniprot keyword and interpro definitions
-    if "go" in biomolecule["annotations"]:
+    if "annotations" in biomolecule and "go" in biomolecule["annotations"]:
         go_terms = list()
         for go in biomolecule["annotations"]["go"]:
             go = {
@@ -86,7 +94,7 @@ def get_biomolecule_by_id(id):
 
     if biomolecule["type"] == 'protein':
         keywords = list()
-        if "keywords" in biomolecule["annotations"]:
+        if "annotations" in biomolecule and "keywords" in biomolecule["annotations"]:
             for keyword in biomolecule["annotations"]["keywords"]:
                 keyword = {
                     "id": keyword,
@@ -96,7 +104,7 @@ def get_biomolecule_by_id(id):
                 keywords.append(keyword)
             biomolecule["annotations"]["keywords"] = keywords
 
-        if "interpro" in biomolecule["xrefs"]:
+        if "xrefs" in biomolecule and "interpro" in biomolecule["xrefs"]:
             if biomolecule["xrefs"]["interpro"]:
                 interpro_terms = list()
                 for interpro in biomolecule["xrefs"]["interpro"]:
@@ -228,7 +236,6 @@ def get_biomolecule_interactors_by_id(id):
 
 
 @app.route('/api/biomolecules/proteins/expressions/', methods=['POST'])
-#@cache.cached(timeout=50000, query_string=True)
 def get_protein_expression():
     database_url = "mongodb://localhost:27018/"
     try:
@@ -250,7 +257,7 @@ def get_protein_expression():
             "uniprot": protein['id']
         })
 
-        proteomics_expression_by_protein = database["proteomicsExpressions"].find_one({
+        proteomics_expression_by_protein = database["proteomicsExpression"].find_one({
             "uniprot": protein['id']
         })
 
@@ -276,13 +283,12 @@ def get_protein_expression():
         prot_expressions = list()
         if proteomics_expression_by_protein is not None:
             for e in proteomics_expression_by_protein["expressions"]:
-                prot_expressions.append(
-                    {
-                        "tissueId": e["tissueId"],
-                        "name": e["sampleName"] if "sampleName" in e else "",
-                        "sample": e["sample"] if "sample" in e else "",
-                        "score": e["confidenceScore"] if "confidenceScore" in e else 0,
-                    })
+                prot_expressions.append({
+                    "tissueId": e["tissueId"],
+                    "name": e["sampleName"] if "sampleName" in e else "",
+                    "sample": e["sample"] if "sample" in e else "",
+                    "score": e["confidenceScore"] if "confidenceScore" in e else 0,
+                })
 
         expression_data[protein['id']] ={
             "gene": protein["relations"]["gene_name"] if protein is not None and "gene_name" in protein["relations"] else None,
@@ -293,7 +299,6 @@ def get_protein_expression():
 
 
 @app.route('/api/associations/', methods=['POST'])
-#@cache.cached(timeout=50000, query_string=True)
 def get_associations_by_biomolecules():
     try:
         biomolecule_ids = json.loads(request.data)["biomolecules"]
@@ -742,101 +747,10 @@ def get_biomolcules_suggestions(search_query):
         }
 
 
-@app.route('/api/networks', methods=['POST'])
+@app.route('/api/network', methods=['POST'])
 def generate_network():
     biomolecules = json.loads(request.data)["biomolecules"]
-    # Get the associations of biomolecules
-    neighbors_by_biomolecule = dict()
-    associations = list()
-    participants = set()
-
-    network_participants = set()
-    for biomolecule in biomolecules:
-        participants.add(biomolecule)
-
-        interactions = database["interactions"].find({
-            "participants": biomolecule
-        })
-        for interaction in interactions:
-
-            association = {
-                "id": interaction["id"],
-                "participants": interaction["participants"],
-            }
-            for p in interaction["participants"]:
-                network_participants.add(p)
-
-            if "score" in interaction:
-                association["score"] = str(interaction["score"])
-
-            if "experiments" in interaction:
-                association["experiments"] = interaction["experiments"]
-
-            if "prediction" in interaction:
-                association["prediction"] = True
-
-            associations.append(association)
-
-            if biomolecule not in neighbors_by_biomolecule:
-                neighbors_by_biomolecule[biomolecule] = set()
-
-            # Check
-            for participant in interaction["participants"]:
-                if participant is not biomolecule:
-                    neighbors_by_biomolecule[biomolecule].add(participant)
-                    participants.add(participant)
-
-    # Compute the interaction
-    if len(biomolecules) > 1 and len(neighbors_by_biomolecule.keys()) > 1:
-        common_neighbors = reduce(lambda x, y: x.intersection(y), list(neighbors_by_biomolecule.values()),
-                                  list(neighbors_by_biomolecule.values())[0])
-
-        interactions = database["interactions"].find({
-            "participants": {
-                "$in": list(common_neighbors)
-            }
-        })
-        for interaction in interactions:
-            association = {
-                "id": interaction["id"],
-                "participants": interaction["participants"],
-            }
-
-            if "experiments" in interaction:
-                association["experiments"] = interaction["experiments"]
-
-            if "prediction" in interaction:
-                association["prediction"] = True
-
-            associations.append(association)
-            for participant in interaction["participants"]:
-                participants.add(participant)
-
-    # Existing biomolecules
-    existing_biomolecules = list(database["biomolecules"].find({
-        'id': {
-           '$in': list(network_participants)
-        }
-    }))
-    missing_biomolecules = network_participants.difference(set(e["id"] for e in existing_biomolecules))
-
-    # Remove duplicates, must be fixed in data
-    unique_associations = dict()
-    for association in associations:
-        assoc_participants = association['participants']
-        should_include = True
-        for p in assoc_participants:
-            if p not in missing_biomolecules:
-                should_include &= True
-            else:
-                should_include &= False
-        if should_include:
-            unique_associations[association["id"]] = association
-
-    return json.dumps({
-        "associations": list(unique_associations.values()),
-        "participants": list(participants)
-    })
+    return network_manager.generate_network(biomolecules)
 
 
 if __name__ == '__main__':
@@ -855,6 +769,8 @@ if __name__ == '__main__':
 
     print("Building meta data cache")
     build_meta_data_cache()
+
+    network_manager = NetworkManager(database_connection=database, meta_data_cache=meta_data_cache)
 
     # Serve the src with gevent
     http_server = WSGIServer(('127.0.0.1', 8000), app)
