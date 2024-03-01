@@ -11,6 +11,7 @@ import json
 from functools import reduce
 from itertools import groupby
 
+from src.matrixdb.biomolecule_services.protein_data_manager import ProteinDataManager
 from src.matrixdb.interactome.network_manager import NetworkManager
 from src.matrixdb.utils.solr.solr_query_controller import query_solr
 
@@ -237,6 +238,7 @@ def get_biomolecule_interactors_by_id(id):
 
 @app.route('/api/biomolecules/proteins/expressions/', methods=['POST'])
 def get_protein_expression():
+    '''
     database_url = "mongodb://localhost:27018/"
     try:
         database_client = MongoClient(database_url)
@@ -294,6 +296,15 @@ def get_protein_expression():
             "gene": protein["relations"]["gene_name"] if protein is not None and "gene_name" in protein["relations"] else None,
             "geneExpression": gene_expressions,
             "proteomicsExpression": prot_expressions
+        }
+
+    '''
+    protein_data_manager = ProteinDataManager(meta_data_cache)
+    expression_data = dict()
+    for protein in json.loads(request.data):
+        expression_data[protein] = {
+            'geneExpression': protein_data_manager.get_gene_expressions(protein),
+            'proteomicsExpression': protein_data_manager.get_proteomics_expression(protein)
         }
     return expression_data
 
