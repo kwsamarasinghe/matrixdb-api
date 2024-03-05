@@ -561,9 +561,11 @@ def search_with_text_solr():
         'q': '*:*',
         'qf': 'biomolecule_id^10.0 name^5 common_name^4 recommended_name^3 description^2 keywords',
         'fq': f'biomolecule_id:*{search_text}* OR name:*{search_text}* OR common_name:*{search_text}* OR '
-              f'recommended_name:*{search_text}* OR description:*{search_text}* OR keywords:*{search_text}*'
+              f'recommended_name:*{search_text}* OR description:*{search_text}* OR keywords:*{search_text}*',
+        'rows': 1000
     }
     biomolecule_solr_docs = query_solr(biomolecules_core_url, biomolecule_query_params)
+    biomolecule_solr_docs = sorted(biomolecule_solr_docs, key=lambda doc: doc['interaction_count'])
 
     publication_query_params = {
         'q': '*:*',
