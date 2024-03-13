@@ -304,7 +304,7 @@ def get_protein_expression():
     for protein in json.loads(request.data):
         expression_data[protein] = {
             'geneExpression': protein_data_manager.get_gene_expressions(protein),
-            'proteomicsExpression': protein_data_manager.get_proteomics_expression(protein)
+            'proteomicsExpression': protein_data_manager.get_proteomics_expressions(protein)
         }
     return expression_data
 
@@ -760,7 +760,17 @@ def get_biomolcules_suggestions(search_query):
         }
 
 
+def network_request_key():
+   """A function which is called to derive the key for a computed value.
+      The key in this case is the concat value of all the json request
+      parameters. Other strategy could to use any hashing function.
+   :returns: unique string for which the value should be cached.
+   """
+   user_data = request.get_json()
+   return ",".join([f"{value}" for value in user_data['biomolecules']])
+
 @app.route('/api/network', methods=['POST'])
+@cache.cached(timeout=60, make_cache_key=network_request_key)
 def generate_network():
     biomolecules = json.loads(request.data)["biomolecules"]
     return network_manager.generate_network(biomolecules)

@@ -41,9 +41,42 @@ class NetworkManager:
         # Get expressions and add to interactor
         if interactor['type'] == 'protein':
             transformed_interactor['geneExpression'] = self.protein_data_manager.get_gene_expressions(interactor['id'])
-            transformed_interactor['proteomicsExpression'] = self.protein_data_manager.get_proteomics_expression(interactor['id'])
+            transformed_interactor['proteomicsExpression'] = self.protein_data_manager.get_proteomics_expressions(interactor['id'])
 
         return transformed_interactor
+
+    def transform_interactors(self, interactors):
+        # Extract the expresssions for interactors
+        gene_expressions = self.protein_data_manager.get_gene_expression_for_proteins(list(i['id'] for i in interactors))
+        proteomics_expressions = self.protein_data_manager.get_proteomics_expressions_for_proteins(list(i['id'] for i in interactors))
+
+        transformed_interactors = list()
+        for interactor in interactors:
+            interactor_id = interactor['id']
+            transformed_interactor = {
+                'id': interactor_id,
+                'type': interactor['type']
+            }
+
+            if 'molecular_details' in interactor and 'pdb' in interactor['molecular_details']:
+                transformed_interactor['pdb'] = len(interactor['molecular_details']) > 0
+
+            if 'ecm' in interactor:
+                transformed_interactor['ecm'] = True
+
+            if 'relations' in interactor and 'gene_name' in interactor['relations']:
+                transformed_interactor['geneName'] = interactor['relations']['gene_name']
+
+            # Get expressions and add to interactor
+            if interactor['type'] == 'protein':
+                if interactor_id in gene_expressions:
+                    transformed_interactor['geneExpression'] = gene_expressions[interactor_id]
+                if interactor_id in proteomics_expressions:
+                    transformed_interactor['proteomicsExpression'] = proteomics_expressions[interactor_id]
+
+            transformed_interactors.append(transformed_interactor)
+
+        return transformed_interactors
 
     def transform_interaction(self, interaction):
         transformed_interaction = {
@@ -103,11 +136,13 @@ class NetworkManager:
                 }
             }))
 
+            # Populate expressions for interactors
+
+
             return {
                 'interactions': list(map(lambda interactions_id: self.transform_interaction(network_interactions[interactions_id]),
                                    network_interactions)),
-                'interactors': list(map(lambda network_interactor: self.transform_interactor(network_interactor),
-                                   network_interactors))
+                'interactors': self.transform_interactors(network_interactors)
             }
         else:
             return {
