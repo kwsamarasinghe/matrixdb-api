@@ -405,6 +405,20 @@ def get_experiments_by_id(id):
     )
 
     if experiments is not None:
+
+        for participant in experiments['participants']:
+            if 'biological_role' in participant:
+                participant['biological_role'] = meta_data_cache['psimi'][participant['biological_role']]['name']
+            if 'experimental_role' in participant:
+                participant['experimental_role'] = meta_data_cache['psimi'][participant['experimental_role']]['name']
+            if 'participant_detection_method' in participant:
+                participant['participant_detection_method'] = meta_data_cache['psimi'][participant['participant_detection_method']]['name']
+
+        experiments['source'] = meta_data_cache['psimi'][experiments['source']]['name']
+        experiments['interaction_type'] = meta_data_cache['psimi'][experiments['interaction_type']]['name']
+        experiments['interaction_detection_method'] = meta_data_cache['psimi'][experiments['interaction_detection_method']]['name']
+
+
         return {
             "message": "Association found",
             "experiment": experiments
@@ -571,9 +585,11 @@ def search_with_text_solr():
         'q': '*:*',
         #'bf': 'publication_id^2.0 title^1.5',
         'fq': f'publication_id:*{search_text}* OR title:*{search_text}* OR abstract:*{search_text}* OR '
-              f'journal:*{search_text}* OR authors:*{search_text}*'
+              f'journal:*{search_text}* OR authors:*{search_text}*',
+        'rows': 1000
     }
     publication_solr_docs = query_solr(publications_core_url, publication_query_params)
+    publication_solr_docs = sorted(publication_solr_docs, key=lambda doc: doc['interaction_count'])
 
     return json.dumps({
         "biomolecules": biomolecule_solr_docs,
