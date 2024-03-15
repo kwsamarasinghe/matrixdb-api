@@ -755,20 +755,24 @@ def get_experiment_stats():
 
 
 @app.route('/api/biomolecules/suggestions/<search_query>', methods=['GET'])
-@cache.cached(timeout=50000)
 def get_biomolcules_suggestions(search_query):
-    if search_query in biomolecule_registry:
-        return {
-            "suggestions": [search_query]
-        }
+    biomolecules_core_url = 'http://localhost:8983/solr/biomolecules'
 
-    index = next((i for i, item in enumerate(biomolecule_registry) if item.lower().startswith(search_query.lower())),
-                 None)
+    biomolecule_query_params = {
+        'q': '*:*',
+        'qf': 'biomolecule_id^10.0 name^5 common_name^4 recommended_name^3 description^2 keywords',
+        'fq': f'biomolecule_id:*{search_query}* OR name:*{search_query}* OR common_name:*{search_query}* OR '
+              f'recommended_name:*{search_query}* OR description:*{search_query}* OR keywords:*{search_query}*',
+        'rows': 1000
+    }
+    biomolecule_solr_docs = query_solr(biomolecules_core_url, biomolecule_query_params)
+    biomolecule_solr_docs = sorted(biomolecule_solr_docs, key=lambda doc: doc['interaction_count'], reverse=True)
 
-    if index is not None:
-        biomolecules_found = biomolecule_registry[index + 1:index + 11]
+    if biomolecule_solr_docs is not None:
+
+        suggestions = list(bd['biomolecule_id'][0] for bd in biomolecule_solr_docs)
         return {
-            "suggestions": list(b.strip('"') for b in biomolecules_found)
+            "suggestions": suggestions
         }
     else:
         return {
