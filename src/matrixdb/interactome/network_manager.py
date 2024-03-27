@@ -82,6 +82,7 @@ class NetworkManager:
         transformed_interaction = {
             'id': interaction['id'],
             'participants': interaction['participants'],
+            'type': ''
         }
 
         if "experiments" in interaction:
@@ -92,6 +93,17 @@ class NetworkManager:
 
         if 'score' in interaction:
             transformed_interaction['score'] = interaction['score']
+
+        if 'prediction' in interaction and 'experiments' in interaction:
+            transformed_interaction['type'] = 'Experimental and Predicted'
+
+        if 'prediction' in interaction and 'experiments' not in interaction:
+            transformed_interaction['type'] = 'Only Predicted'
+
+        if 'prediction' not in interaction and 'experiments' in interaction:
+            transformed_interaction['type'] = 'Only Experimental'
+
+
 
         return transformed_interaction
 
@@ -116,6 +128,7 @@ class NetworkManager:
         network_interactions = dict()
         network_interactors_map = dict()
         if len(interactions) > 0:
+
             for interaction in interactions:
 
                 if interaction['id'] in interactions:
@@ -136,9 +149,25 @@ class NetworkManager:
                 }
             }))
 
+            unique_interactors = dict()
+            for i in network_interactors:
+                if i['id'] not in unique_interactors:
+                    unique_interactors[i['id']] = i
+                else:
+                    print()
+            network_interactors = unique_interactors.values()
+
             # Populate expressions for interactors
-
-
+            ev = list()
+            for i in network_interactions:
+                interaction = network_interactions[i]
+                if 'experiments' in interaction:
+                    if 'direct' in interaction['experiments']:
+                        if 'binary' in interaction['experiments']['direct']:
+                            ev.extend(interaction['experiments']['direct']['binary'])
+                        if 'spoke_expanded_from' in interaction['experiments']['direct']:
+                            ev.extend(interaction['experiments']['direct']['spoke_expanded_from'])
+            print()
             return {
                 'interactions': list(map(lambda interactions_id: self.transform_interaction(network_interactions[interactions_id]),
                                    network_interactions)),

@@ -571,11 +571,15 @@ def search_with_text_solr():
     biomolecules_core_url = 'http://localhost:8983/solr/biomolecules'
     publications_core_url = 'http://localhost:8983/solr/publications'
 
+    # Hack
+    if 'chebi:' in search_text or 'cpx:' in search_text:
+        search_text = search_text.replace('chebi:', '')
+
     biomolecule_query_params = {
         'q': '*:*',
         'qf': 'biomolecule_id^10.0 name^5 common_name^4 recommended_name^3 description^2 keywords',
         'fq': f'biomolecule_id:*{search_text}* OR name:*{search_text}* OR common_name:*{search_text}* OR '
-              f'recommended_name:*{search_text}* OR description:*{search_text}* OR keywords:*{search_text}*',
+              f'recommended_name:*{search_text}* OR description:*{search_text}* OR keywords:*{search_text}* OR xrefs:*{search_text}*',
         'rows': 1000
     }
     biomolecule_solr_docs = query_solr(biomolecules_core_url, biomolecule_query_params)
@@ -769,8 +773,21 @@ def get_biomolcules_suggestions(search_query):
     biomolecule_solr_docs = sorted(biomolecule_solr_docs, key=lambda doc: doc['interaction_count'], reverse=True)
 
     if biomolecule_solr_docs is not None:
+        suggestions = []
+        for bd in biomolecule_solr_docs:
+            if 'name' not in bd:
+                continue
+            '''
+            suggestion = {
+                'id': bd['biomolecule_id'][0],
+                'name': bd['name'][0],
+            }
+            if 'xrefs' in bd:
+                suggestion['xref'] = bd['xrefs'][0]
+            '''
 
-        suggestions = list(bd['biomolecule_id'][0] for bd in biomolecule_solr_docs)
+
+            suggestions.append(bd['name'])
         return {
             "suggestions": suggestions
         }
@@ -794,6 +811,84 @@ def network_request_key():
 def generate_network():
     biomolecules = json.loads(request.data)["biomolecules"]
     return network_manager.generate_network(biomolecules)
+
+@app.route('/api/publications/<pubmed_id>', methods=['GET'])
+@cache.cached(timeout=60)
+def get_publication_details_by_id(pubmed_id):
+    experiments_by_pubmed = database['experiments'].find({
+        'pmid': pubmed_id
+    })
+
+    if experiments_by_pubmed is None:
+        return json.dumps({
+            'pubmed': pubmed_id,
+            'interactions': []
+        })
+
+    experiment_ids = list(experiment['id'] for experiment in experiments_by_pubmed)
+    interactions_by_pubmed = database['interactions'].find({
+        '$or' : [
+            {
+                'experiments.direct.spoke_expanded_from': {
+                    '$in' : experiment_ids
+                }
+            },
+            {
+                'experiments.direct.binary': {
+                    '$in': experiment_ids
+                }
+            }
+        ]
+    })
+
+    interactions_to_return = list()
+
+    for interaction in interactions_by_pubmed:
+        # Filterout non-relevant evidences from the list of interactions
+        relevant_binary_evidences = list()
+        relavant_spoke_evidence = list()
+        if 'experiments' in interaction:
+            if 'direct' in interaction['experiments']:
+                if 'binary' in interaction['experiments']['direct']:
+                    for binary_evidence in interaction['experiments']['direct']['binary']:
+                        if pubmed_id in binary_evidence:
+                            relevant_binary_evidences.append(binary_evidence)
+                if 'spoke_expanded_from' in interaction['experiments']['direct']:
+                    for spoke_evidence in interaction['experiments']['direct']['spoke_expanded_from']:
+                        if pubmed_id in spoke_evidence:
+                            relavant_spoke_evidence.append(spoke_evidence)
+
+        interaction['experiments']['direct']['binary'] = relevant_binary_evidences
+        interaction['experiments']['direct']['spoke_expanded_from'] = relavant_spoke_evidence
+
+        interactions_to_return.append({
+            'id': interaction['id'],
+            'participants': interaction['participants'],
+            'experiments': interaction['experiments'],
+            'score': interaction['score']
+        })
+
+    publication_to_return = {
+        'publication': pubmed_id,
+        'interactions': interactions_to_return
+    }
+
+    # publication details
+    publication = database['publications'].find_one({
+        'id': pubmed_id
+    })
+
+    if publication:
+        publication_to_return['title'] = publication['title']
+        publication_to_return['authors'] =  publication['authors']
+        if 'journal' in publication:
+            publication_to_return['journal'] =  publication['journal']
+        if 'epubdate' in publication:
+            publication_to_return['epubdate'] = publication['epubdate']
+        if 'pubdate' in publication:
+            publication_to_return['pubdate'] = publication['pubdate']
+
+    return json.dumps(publication_to_return)
 
 
 if __name__ == '__main__':
