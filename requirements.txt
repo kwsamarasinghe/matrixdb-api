@@ -7,5 +7,4 @@ pymongo
 pyparsing
 requests
 urllib3
-Werkzeug
 pandas
