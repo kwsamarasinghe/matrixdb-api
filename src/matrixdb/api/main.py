@@ -571,26 +571,20 @@ def search_with_text_solr():
     biomolecules_core_url = 'http://localhost:8983/solr/biomolecules'
     publications_core_url = 'http://localhost:8983/solr/publications'
 
-    # Hack
-    if 'chebi:' in search_text or 'cpx:' in search_text:
-        search_text = search_text.replace('chebi:', '')
-
     biomolecule_query_params = {
-        'q': '*:*',
-        'qf': 'biomolecule_id^10.0 name^5 common_name^4 recommended_name^3 description^2 keywords',
-        'fq': f'biomolecule_id:*{search_text}* OR name:*{search_text}* OR common_name:*{search_text}* OR '
-              f'recommended_name:*{search_text}* OR description:*{search_text}* OR keywords:*{search_text}* OR xrefs:*{search_text}*',
-        'rows': 1000
+        'q': f'{search_text}',
+        'defType': 'dismax',
+        'qf': 'biomolecule_id^10.0 name^5 common_name^4 recommended_name^3 other_name^2 species^2 description^2 chebi complex_portal go_names go_ids keyword_ids keyword_names',
+        'rows': 100
     }
     biomolecule_solr_docs = query_solr(biomolecules_core_url, biomolecule_query_params)
     biomolecule_solr_docs = sorted(biomolecule_solr_docs, key=lambda doc: doc['interaction_count'])
 
     publication_query_params = {
-        'q': '*:*',
-        #'bf': 'publication_id^2.0 title^1.5',
-        'fq': f'publication_id:*{search_text}* OR title:*{search_text}* OR abstract:*{search_text}* OR '
-              f'journal:*{search_text}* OR authors:*{search_text}*',
-        'rows': 1000
+        'q': f'{search_text}',
+        'defType': 'dismax',
+        'qf': 'publication_id title authors journal',
+        'rows': 100
     }
     publication_solr_docs = query_solr(publications_core_url, publication_query_params)
     publication_solr_docs = sorted(publication_solr_docs, key=lambda doc: doc['interaction_count'])
