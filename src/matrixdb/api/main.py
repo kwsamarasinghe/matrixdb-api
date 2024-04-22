@@ -763,6 +763,7 @@ def get_publication_details_by_id(pubmed_id):
 if __name__ == '__main__':
 
     # Connects to the db
+    print(f'Connecting to database {database_url}')
     try:
         database_client = MongoClient(database_url)
         core_database_connection = database_client["matrixdb_4_0"]
