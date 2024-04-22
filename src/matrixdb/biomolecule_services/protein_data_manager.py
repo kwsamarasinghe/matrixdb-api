@@ -4,18 +4,12 @@ from itertools import groupby
 
 class ProteinDataManager:
 
-    def __init__(self, meta_data_cache):
+    def __init__(self, database_connection, meta_data_cache):
         self.meta_data_cache = meta_data_cache
-        # So far only to handle expression data connect to pre prod
-        database_url = "mongodb://localhost:27018/"
-        try:
-            database_client = MongoClient(database_url)
-            self.database = database_client["matrixdb-4_0-pre-prod"]
-        except Exception:
-            print("Problem connecting to db " + database_url)
+        self.database_connection = database_connection
 
     def get_gene_expressions(self, protein_id):
-        expressions_by_protein = self.database["geneExpression"].find_one({
+        expressions_by_protein = self.database_connection["geneExpression"].find_one({
             "uniprot": protein_id
         })
 
@@ -43,7 +37,7 @@ class ProteinDataManager:
         return gene_expressions
 
     def get_gene_expression_for_proteins(self, protein_ids):
-        expressions_by_proteins = self.database["geneExpression"].find({
+        expressions_by_proteins = self.database_connection["geneExpression"].find({
             "uniprot": {
                 '$in': protein_ids
             }
@@ -76,7 +70,7 @@ class ProteinDataManager:
 
     def get_proteomics_expressions(self, protein_id):
 
-        proteomics_expression_by_protein = self.database["proteomicsExpression"].find_one({
+        proteomics_expression_by_protein = self.database_connection["proteomicsExpression"].find_one({
             "uniprot": protein_id
         })
 
@@ -105,7 +99,7 @@ class ProteinDataManager:
 
     def get_proteomics_expressions_for_proteins(self, protein_ids):
 
-        proteomics_expression_by_proteins = self.database["proteomicsExpression"].find({
+        proteomics_expression_by_proteins = self.database_connection["proteomicsExpression"].find({
             "uniprot": {
                 '$in': protein_ids
             }

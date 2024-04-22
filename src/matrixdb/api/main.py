@@ -15,6 +15,15 @@ from src.matrixdb.biomolecule_services.protein_data_manager import ProteinDataMa
 from src.matrixdb.interactome.network_manager import NetworkManager
 from src.matrixdb.utils.solr.solr_query_controller import query_solr
 
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
+
+database_url = os.getenv('DATABASE_URL')
+solr_url = os.getenv('SOLR_URL')
+
 config = {
     "DEBUG": True,          # some Flask specific configs
     "CACHE_TYPE": "SimpleCache",  # Flask-Caching related configs
@@ -40,7 +49,7 @@ meta_data_cache = {
 # Build biomolecule registry
 def build_biomolecule_registry():
     biomolecules = list()
-    for biomolecule in database["biomolecules"].find():
+    for biomolecule in core_database_connection["biomolecules"].find():
         biomolecules.append(biomolecule["id"])
 
     return sorted(biomolecules)
@@ -48,32 +57,32 @@ def build_biomolecule_registry():
 
 def build_meta_data_cache():
     # psimi
-    for psimi in database["psimi"].find():
+    for psimi in core_database_connection["psimi"].find():
         meta_data_cache["psimi"][psimi["id"]] = psimi
 
     # go
-    for go in database["go"].find():
+    for go in core_database_connection["go"].find():
         meta_data_cache["go"][go["id"]] = go
 
     # Interpro
-    for interpro in database["interpro"].find():
+    for interpro in core_database_connection["interpro"].find():
         meta_data_cache["interpro"][interpro["id"]] = interpro
 
     # Uniprot keywords
-    for uniprot_keyword in database["uniprotKeywords"].find():
+    for uniprot_keyword in core_database_connection["uniprotKeywords"].find():
         meta_data_cache["uniprotKeywords"][uniprot_keyword["id"]] = uniprot_keyword
 
-    for uberon in database["uberon"].find():
+    for uberon in core_database_connection["uberon"].find():
         meta_data_cache["uberon"][uberon["id"]] = uberon
 
-    for bto in database["brenda"].find():
+    for bto in core_database_connection["brenda"].find():
         meta_data_cache["bto"][bto["id"]] = bto
 
 
 @app.route('/api/biomolecules/<id>', methods=['GET'])
 @cache.cached(timeout=50000, query_string=True)
 def get_biomolecule_by_id(id):
-    biomolecule = database["biomolecules"].find_one({
+    biomolecule = core_database_connection["biomolecules"].find_one({
         "id": id
     },
     {
@@ -123,7 +132,7 @@ def get_biomolecule_by_id(id):
 @app.route('/api/biomolecules/', methods=['POST'])
 def get_biomolecules_by_id():
     biomoelcule_ids = json.loads(request.data)["ids"]
-    biomolecules = list(database["biomolecules"].find({
+    biomolecules = list(core_database_connection["biomolecules"].find({
         "id": {
             "$in": biomoelcule_ids
         }
@@ -135,11 +144,11 @@ def get_biomolecules_by_id():
     for biomolecule in biomolecules:
         if biomolecule["type"] == 'protein':
 
-            expressions_by_protein = database["geneExpression"].find_one({
+            expressions_by_protein = core_database_connection["geneExpression"].find_one({
                 "uniprot": biomolecule["id"]
             })
 
-            proteomics_expression_by_protein = database["proteomicsExpressions"].find_one({
+            proteomics_expression_by_protein = core_database_connection["proteomicsExpressions"].find_one({
                 "uniprot": biomolecule["id"]
             })
 
@@ -179,7 +188,7 @@ def get_biomolecules_by_id():
 
 @app.route('/api/biomolecules/<id>/interactors/', methods=['GET'])
 def get_biomolecule_interactors_by_id(id):
-    interactions = list(database["interactions"].find(
+    interactions = list(core_database_connection["interactions"].find(
         {
             "participants": id
         },
@@ -299,7 +308,7 @@ def get_protein_expression():
         }
 
     '''
-    protein_data_manager = ProteinDataManager(meta_data_cache)
+    protein_data_manager = ProteinDataManager(secondary_databse_connection, meta_data_cache)
     expression_data = dict()
     for protein in json.loads(request.data):
         expression_data[protein] = {
@@ -313,7 +322,7 @@ def get_protein_expression():
 def get_associations_by_biomolecules():
     try:
         biomolecule_ids = json.loads(request.data)["biomolecules"]
-        interactions = list(database["interactions"].find(
+        interactions = list(core_database_connection["interactions"].find(
             {
                 "participants": {
                     "$in": biomolecule_ids
@@ -329,7 +338,7 @@ def get_associations_by_biomolecules():
             for participant in interaction["participants"]:
                 participants.add(participant)
 
-        participants = list(database["biomolecules"].find(
+        participants = list(core_database_connection["biomolecules"].find(
             {
                 "id": {
                     "$in": list(participants)
@@ -342,7 +351,7 @@ def get_associations_by_biomolecules():
         for p in participants:
             unique_participants[p["id"]] = p
 
-        for expression in list(database["proteomicsExpression"].find(
+        for expression in list(core_database_connection["proteomicsExpression"].find(
             {
                 "uniprot": {
                     "$in": list(key for key in unique_participants)
@@ -373,7 +382,7 @@ def get_associations_by_biomolecules():
 
 @app.route('/api/associations/<id>', methods=['GET'])
 def get_association_by_id(id):
-    association = database["interactions"].find_one(
+    association = core_database_connection["interactions"].find_one(
         {
             "id": id
         },
@@ -395,7 +404,7 @@ def get_association_by_id(id):
 
 @app.route('/api/experiments/<id>', methods=['GET'])
 def get_experiments_by_id(id):
-    experiments = database["experiments"].find_one(
+    experiments = core_database_connection["experiments"].find_one(
         {
             "id": id
         },
@@ -432,7 +441,7 @@ def get_experiments_by_id(id):
 def get_experiments_by_ids():
     experiment_ids = json.loads(request.data)["ids"]
 
-    experiments = database["experiments_new"].find(
+    experiments = core_database_connection["experiments_new"].find(
         {
             "id": {
                 '$in': experiment_ids
@@ -457,7 +466,7 @@ def get_experiments_by_ids():
 @app.route('/api/xrefs', methods=['GET'])
 def get_xrefs_by_ids():
     ids_to_search = request.args.getlist('id')
-    xrefs = database["Keywrds"].find(
+    xrefs = core_database_connection["Keywrds"].find(
         {
             "id": {
                 "$in": ids_to_search
@@ -568,8 +577,8 @@ def search_with_text_solr():
     args = request.args
     search_text = args['text']
 
-    biomolecules_core_url = 'http://localhost:8983/solr/biomolecules'
-    publications_core_url = 'http://localhost:8983/solr/publications'
+    biomolecules_core_url = f'{solr_url}/solr/biomolecules'
+    publications_core_url = f'{solr_url}/solr/publications'
 
     biomolecule_query_params = {
         'q': f'{search_text}',
@@ -600,9 +609,10 @@ def convert_name(name):
     else:
         return name
 
+
 @app.route('/api/statistics/', methods=['GET'])
 def get_stats():
-    statistics = list(database["statistics"].find())
+    statistics = list(core_database_connection["statistics"].find())
     statistics_reply = dict()
     for statistic in statistics:
         if statistic["category"] == "biomolecule_counts":
@@ -616,149 +626,12 @@ def get_stats():
     return json.dumps(statistics_reply)
 
 
-@app.route('/api/statistics/biomolecules', methods=['GET'])
-@cache.cached(timeout=50000)
-def get_biomol_stats():
-    biomols = list(database["biomolecules"].find({}))
-
-    # Group by type
-    df = pd.DataFrame(biomols)
-    biomol_groups = df.groupby('type').size().to_dict()
-
-    biomol_types = {b["id"] : b["type"] for b in biomols}
-
-    # For proteins check which associations have at least one ECM
-    matrisome_keywords = database["matrisome"].find({})
-    matrisome_dict = {matrisome_keyword["protein"]: matrisome_keyword["keyword"] for matrisome_keyword in
-                      list(matrisome_keywords)}
-
-    associations = database["cleaned_associations"].find({})
-    biomols_in_associations = dict()
-
-    ecm_stats = {
-        "both": 0,
-        "one": 0,
-        "neither":  0
-    }
-
-    for association in list(associations):
-        if len(association["biomolecules"]) != 2:
-            print("non binary")
-            b0 = association["biomolecules"][0]
-            type_0 = biomol_types[b0]
-            if b0 in matrisome_dict:
-                ecm_stats["one"] += 1
-
-            if type_0 not in biomols_in_associations:
-                biomols_in_associations[type_0] = 0
-            continue
-
-        b0 = association["biomolecules"][0]
-        b1 = association["biomolecules"][1]
-        if b0 in biomol_types:
-            type_0 = biomol_types[b0]
-
-        if b1 in biomol_types:
-            type_1 = biomol_types[b1]
-
-
-        if type_0 is not None:
-            if type_0 not in biomols_in_associations:
-                biomols_in_associations[type_0] = set()
-            biomols_in_associations[type_0].add(b0)
-
-            if type_0 == 'protein':
-                b0_obj = list(filter(lambda b: b["id"] == b0, biomols))[0]
-                if "annotations" in b0_obj:
-                    if "subcell_location" in b0_obj["annotations"]:
-                        print(b0_obj["annotations"]["subcell_location"])
-                    if "keywords" in b0_obj["annotations"]:
-                        print(b0_obj["annotations"]["keywords"])
-                else:
-                    print(b0 + " No annotations")
-
-        if type_1 is not None:
-            if type_1 not in biomols_in_associations:
-                biomols_in_associations[type_1] = set()
-            biomols_in_associations[type_1].add(b1)
-
-            if type_1 == 'protein':
-                b1_obj = list(filter(lambda b: b["id"] == b1, biomols))[0]
-                if "annotations" in b1_obj:
-                    if "subcell_location" in b1_obj["annotations"]:
-                        print(b1_obj["annotations"]["subcell_location"])
-                    if "keywords" in b1_obj["annotations"]:
-                        print(b1_obj["annotations"]["keywords"])
-                else:
-                    print(b1_obj)
-
-        if b0 in matrisome_dict and b1 in matrisome_dict:
-            ecm_stats["both"] += 1
-
-        elif b0 not in matrisome_dict and b1 not in matrisome_dict:
-            ecm_stats["neither"] += 1
-        else:
-            ecm_stats["one"] += 1
-
-    for biomol_type in biomols_in_associations:
-        biomols_in_associations[biomol_type] = len(biomols_in_associations[biomol_type])
-
-    return json.dumps({
-        "biomolecules": biomol_groups,
-        "in_assocs" : biomols_in_associations,
-        "ecm_stats" : ecm_stats
-    })
-
-
-@app.route('/api/statistics/experiments', methods=['GET'])
-@cache.cached(timeout=50000)
-def get_experiment_stats():
-    # Count experiments
-    experiments = list(database["experiments_new"].find({}))
-
-    all_exps_supported = 0
-    for experiment in experiments:
-        if "directly_supports" in experiment:
-            all_exps_supported += len(experiment["directly_supports"])
-
-        if "spoke_expanded_into" in experiment:
-            all_exps_supported += len(experiment["spoke_expanded_into"])
-
-    # Exps and assocs with source matrixdb
-    matrixdb_experiments = [me for me in experiments if "source" in me and me["source"] == "MI:0917"]
-    matrixdb_experiments_supporting_associations = set()
-    for me in matrixdb_experiments:
-        if "directly_supports" in me:
-            for exp in me["directly_supports"]:
-                matrixdb_experiments_supporting_associations.add(exp)
-
-        if "spoke_expanded_into" in me:
-            for exp in me["spoke_expanded_into"]:
-                matrixdb_experiments_supporting_associations.add(exp)
-
-    experiment_counts = {
-        "total": {
-            "experiments": len(experiments),
-            "experimentally_supported_assocs": all_exps_supported
-        },
-        "matrixdb_core": {
-            "experiments": len(matrixdb_experiments),
-            "experimentally_supported_assocs": len(list(matrixdb_experiments_supporting_associations))
-        }
-    }
-
-    return json.dumps({
-        "experiments": experiment_counts
-    })
-
-
 @app.route('/api/biomolecules/suggestions/<search_query>', methods=['GET'])
 def get_biomolcules_suggestions(search_query):
-    biomolecules_core_url = 'http://localhost:8983/solr/biomolecules'
+    biomolecules_core_url = f'{solr_url}/solr/biomolecules'
 
     biomolecule_query_params = {
         'q': '*:*',
-        'qf': 'biomolecule_id^10.0 name^5 common_name^4 recommended_name^3 description^2 keywords',
         'fq': f'biomolecule_id:*{search_query}* OR name:*{search_query}* OR common_name:*{search_query}* OR '
               f'recommended_name:*{search_query}* OR description:*{search_query}* OR keywords:*{search_query}*',
         'rows': 1000
@@ -800,16 +673,18 @@ def network_request_key():
    user_data = request.get_json()
    return ",".join([f"{value}" for value in user_data['biomolecules']])
 
+
 @app.route('/api/network', methods=['POST'])
 @cache.cached(timeout=60, make_cache_key=network_request_key)
 def generate_network():
     biomolecules = json.loads(request.data)["biomolecules"]
     return network_manager.generate_network(biomolecules)
 
+
 @app.route('/api/publications/<pubmed_id>', methods=['GET'])
 @cache.cached(timeout=60)
 def get_publication_details_by_id(pubmed_id):
-    experiments_by_pubmed = database['experiments'].find({
+    experiments_by_pubmed = core_database_connection['experiments'].find({
         'pmid': pubmed_id
     })
 
@@ -820,7 +695,7 @@ def get_publication_details_by_id(pubmed_id):
         })
 
     experiment_ids = list(experiment['id'] for experiment in experiments_by_pubmed)
-    interactions_by_pubmed = database['interactions'].find({
+    interactions_by_pubmed = core_database_connection['interactions'].find({
         '$or' : [
             {
                 'experiments.direct.spoke_expanded_from': {
@@ -868,7 +743,7 @@ def get_publication_details_by_id(pubmed_id):
     }
 
     # publication details
-    publication = database['publications'].find_one({
+    publication = core_database_connection['publications'].find_one({
         'id': pubmed_id
     })
 
@@ -888,11 +763,10 @@ def get_publication_details_by_id(pubmed_id):
 if __name__ == '__main__':
 
     # Connects to the db
-    database_url = "mongodb://localhost:27018/"
-    datasets = {}
     try:
         database_client = MongoClient(database_url)
-        database = database_client["matrixdb_4_0"]
+        core_database_connection = database_client["matrixdb_4_0"]
+        secondary_databse_connection = database_client["matrixdb-4_0-pre-prod"]
     except Exception:
         print("Problem connecting to db " + database_url)
 
@@ -902,7 +776,11 @@ if __name__ == '__main__':
     print("Building meta data cache")
     build_meta_data_cache()
 
-    network_manager = NetworkManager(database_connection=database, meta_data_cache=meta_data_cache)
+    protein_data_manager = ProteinDataManager(database_connection=secondary_databse_connection,
+                                              meta_data_cache=meta_data_cache)
+    network_manager = NetworkManager(database_connection=core_database_connection,
+                                     meta_data_cache=meta_data_cache,
+                                     protein_data_manager=protein_data_manager)
 
     # Serve the src with gevent
     http_server = WSGIServer(('127.0.0.1', 8000), app)

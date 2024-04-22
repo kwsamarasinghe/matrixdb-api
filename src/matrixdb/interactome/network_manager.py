@@ -3,11 +3,11 @@ from src.matrixdb.biomolecule_services.protein_data_manager import ProteinDataMa
 
 class NetworkManager:
 
-    def __init__(self, database_connection, meta_data_cache):
+    def __init__(self, database_connection, meta_data_cache, protein_data_manager):
         # initialize database connection
         self.database_connection = database_connection
         self.biomolecule_cache = meta_data_cache
-        self.protein_data_manager = ProteinDataManager(meta_data_cache)
+        self.protein_data_manager = protein_data_manager
 
     def merge_associations(self, *interactions):
         result = interactions[0].copy()
