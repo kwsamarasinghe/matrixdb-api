@@ -1,5 +1,3 @@
-from src.matrixdb.biomolecule_services.protein_data_manager import ProteinDataManager
-
 
 class NetworkManager:
 
@@ -92,7 +90,8 @@ class NetworkManager:
             transformed_interaction['prediction'] = True
 
         if 'score' in interaction:
-            transformed_interaction['score'] = interaction['score']
+            if interaction['score'] != '-':
+                transformed_interaction['score'] = interaction['score']
 
         if 'prediction' in interaction and 'experiments' in interaction:
             transformed_interaction['type'] = 'Experimental and Predicted'
