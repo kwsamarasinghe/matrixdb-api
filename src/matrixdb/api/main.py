@@ -774,6 +774,10 @@ def get_publication_details_by_id(pubmed_id):
             publication_to_return['epubdate'] = publication['epubdate']
         if 'pubdate' in publication:
             publication_to_return['pubdate'] = publication['pubdate']
+        publication_to_return['source'] = publication['source']
+        publication_to_return['volume'] = publication['volume']
+        publication_to_return['issue'] = publication['issue']
+        publication_to_return['pages'] = publication['pages']
 
     return json.dumps(publication_to_return)
 
