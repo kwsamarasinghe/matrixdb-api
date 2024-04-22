@@ -1,16 +1,38 @@
-version: "3.9"
+version: "2.4"
 services:
+  solr:
+    image: solr:latest
+    container_name: solr
+    ports:
+      - "8983:8983"
+    volumes:
+      - solr-data:/var/solr
+    restart: always
+    networks:
+      - matrixdb_network
   mongo:
     image: mongo
     ports:
       - 27018:27017
     volumes:
-      - MATRIXDB_HOME/data:/data/db
+      - mongo-data:/data/db
     restart: always
+    networks:
+      - matrixdb_network
   api:
     depends_on:
       - mongo
+      - solr
     build: .
     ports:
       - 8000:8000
     restart: always
+    networks:
+      - matrixdb_network
+
+volumes:
+  mongo-data:
+  solr-data:
+
+networks:
+  matrixdb_network:
