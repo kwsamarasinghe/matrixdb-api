@@ -592,7 +592,7 @@ def search_with_text_solr():
     biomolecule_query_params = {
         'q': f'{search_text}',
         'defType': 'dismax',
-        'qf': 'biomolecule_id^10.0 name^5 common_name^4 recommended_name^3 other_name^2 species^2 description^2 chebi complex_portal go_names go_ids keyword_ids keyword_names',
+        'qf': 'biomolecule_id^10.0 name^5 common_name^4 recommended_name^3 other_name^2 species^2 description^2 gene^6 chebi complex_portal go_names go_ids keyword_ids keyword_names',
         'fq':  'interaction_count:[1 TO *]',
         'rows': 100
     }
@@ -645,7 +645,7 @@ def get_biomolcules_suggestions(search_query):
     biomolecule_query_params = {
         'q': f'{search_query}',
         'defType': 'dismax',
-        'qf': 'biomolecule_id^10.0 name^5 common_name^4 recommended_name^3 other_name^2 species^2 description^2 chebi complex_portal go_names go_ids keyword_ids keyword_names',
+        'qf': 'biomolecule_id^10.0 name^5 common_name^4 recommended_name^3 other_name^2 species^2 description^2 gene^6 chebi complex_portal go_names go_ids keyword_ids keyword_names',
         'fq': 'interaction_count:[1 TO *]',
         'rows': 100
     }
