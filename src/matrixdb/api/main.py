@@ -106,12 +106,21 @@ def get_biomolecule_by_id(id):
         keywords = list()
         if "annotations" in biomolecule and "keywords" in biomolecule["annotations"]:
             for keyword in biomolecule["annotations"]["keywords"]:
-                keyword = {
-                    "id": keyword,
-                    "definition": meta_data_cache["uniprotKeywords"][keyword]["definition"],
-                    "term": meta_data_cache["uniprotKeywords"][keyword]["name"]
-                }
-                keywords.append(keyword)
+                # Have to handle unipro/trembl separately for the moment
+                if type(keyword) == dict:
+                    keyword_id = keyword['id']
+                    keyword = {
+                        "id": keyword_id,
+                        "definition": meta_data_cache["uniprotKeywords"][keyword_id]["definition"],
+                        "term": meta_data_cache["uniprotKeywords"][keyword_id]["name"]
+                    }
+                else:
+                    keyword = {
+                        "id": keyword,
+                        "definition": meta_data_cache["uniprotKeywords"][keyword]["definition"],
+                        "term": meta_data_cache["uniprotKeywords"][keyword]["name"]
+                    }
+                    keywords.append(keyword)
             biomolecule["annotations"]["keywords"] = keywords
 
         if "xrefs" in biomolecule and "interpro" in biomolecule["xrefs"]:
@@ -122,7 +131,7 @@ def get_biomolecule_by_id(id):
                         if interpro in meta_data_cache["interpro"]:
                             interpro_terms.append({
                                 'id': meta_data_cache["interpro"][interpro]["id"],
-                                'name': meta_data_cache["interpro"][interpro]["name"]
+                                'value': meta_data_cache["interpro"][interpro]["name"]
                             })
                 biomolecule["xrefs"]["interpro"] = interpro_terms
 
@@ -584,9 +593,12 @@ def search_with_text_solr():
         'q': f'{search_text}',
         'defType': 'dismax',
         'qf': 'biomolecule_id^10.0 name^5 common_name^4 recommended_name^3 other_name^2 species^2 description^2 chebi complex_portal go_names go_ids keyword_ids keyword_names',
+        'fq':  'interaction_count:[1 TO *]',
         'rows': 100
     }
     biomolecule_solr_docs = query_solr(biomolecules_core_url, biomolecule_query_params)
+    # Only consider biomolecules with interactions
+    biomolecule_solr_docs = list(filter(lambda doc: doc['interaction_count'] > 0, biomolecule_solr_docs))
     biomolecule_solr_docs = sorted(biomolecule_solr_docs, key=lambda doc: doc['interaction_count'])
 
     publication_query_params = {
@@ -711,7 +723,7 @@ def get_publication_details_by_id(pubmed_id):
     })
 
     interactions_to_return = list()
-
+    participants_to_return = set()
     for interaction in interactions_by_pubmed:
         # Filterout non-relevant evidences from the list of interactions
         relevant_binary_evidences = list()
@@ -737,9 +749,13 @@ def get_publication_details_by_id(pubmed_id):
             'score': interaction['score']
         })
 
+        for participant in  interaction['participants']:
+            participants_to_return.add(participant)
+
     publication_to_return = {
         'publication': pubmed_id,
-        'interactions': interactions_to_return
+        'interactions': interactions_to_return,
+        'participants': list(participants_to_return)
     }
 
     # publication details
