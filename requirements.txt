@@ -9,5 +9,5 @@ requests
 urllib3
 Werkzeug
 pandas
-dotenv
+python-dotenv
 uwsgi
