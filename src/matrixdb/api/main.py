@@ -643,13 +643,15 @@ def get_biomolcules_suggestions(search_query):
     biomolecules_core_url = f'{solr_url}/solr/biomolecules'
 
     biomolecule_query_params = {
-        'q': '*:*',
-        'fq': f'biomolecule_id:*{search_query}* OR name:*{search_query}* OR common_name:*{search_query}* OR '
-              f'recommended_name:*{search_query}* OR description:*{search_query}* OR keywords:*{search_query}*',
-        'rows': 1000
+        'q': f'{search_query}',
+        'defType': 'dismax',
+        'qf': 'biomolecule_id^10.0 name^5 common_name^4 recommended_name^3 other_name^2 species^2 description^2 chebi complex_portal go_names go_ids keyword_ids keyword_names',
+        'fq': 'interaction_count:[1 TO *]',
+        'rows': 100
     }
     biomolecule_solr_docs = query_solr(biomolecules_core_url, biomolecule_query_params)
-    biomolecule_solr_docs = sorted(biomolecule_solr_docs, key=lambda doc: doc['interaction_count'], reverse=True)
+    biomolecule_solr_docs = list(filter(lambda doc: doc['interaction_count'] > 0, biomolecule_solr_docs))
+    biomolecule_solr_docs = sorted(biomolecule_solr_docs, key=lambda doc: doc['interaction_count'])
 
     if biomolecule_solr_docs is not None:
         suggestions = []
@@ -666,7 +668,7 @@ def get_biomolcules_suggestions(search_query):
             '''
 
 
-            suggestions.append(bd['name'])
+            suggestions.append(bd)
         return {
             "suggestions": suggestions
         }

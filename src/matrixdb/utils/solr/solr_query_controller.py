@@ -1,3 +1,6 @@
+import urllib
+from urllib.parse import urlencode
+
 import requests as requests
 
 
@@ -12,6 +15,6 @@ def query_solr(core_url, params):
     Returns:
     - The Solr query response in JSON format
     """
-    full_url = f"{core_url}/select"
-    response = requests.get(full_url, params=params)
+    full_url = f"{core_url}/select?{urllib.parse.urlencode(params)}"
+    response = requests.get(full_url)
     return response.json()["response"]["docs"]
