@@ -426,15 +426,30 @@ def get_experiments_by_id(id):
 
         for participant in experiments['participants']:
             if 'biological_role' in participant:
-                participant['biological_role'] = meta_data_cache['psimi'][participant['biological_role']]['name']
+                participant['biological_role'] = {
+                    'id': meta_data_cache['psimi'][participant['biological_role']]['id'],
+                    'name': meta_data_cache['psimi'][participant['biological_role']]['name']
+                }
             if 'experimental_role' in participant:
-                participant['experimental_role'] = meta_data_cache['psimi'][participant['experimental_role']]['name']
+                participant['experimental_role'] = {
+                    'id': meta_data_cache['psimi'][participant['experimental_role']]['id'],
+                    'name': meta_data_cache['psimi'][participant['experimental_role']]['name']
+                }
             if 'participant_detection_method' in participant:
-                participant['participant_detection_method'] = meta_data_cache['psimi'][participant['participant_detection_method']]['name']
+                participant['participant_detection_method'] = {
+                    'id': meta_data_cache['psimi'][participant['participant_detection_method']]['id'],
+                    'name': meta_data_cache['psimi'][participant['participant_detection_method']]['name']
+                }
 
-        experiments['source'] = meta_data_cache['psimi'][experiments['source']]['name']
-        experiments['interaction_type'] = meta_data_cache['psimi'][experiments['interaction_type']]['name']
-        experiments['interaction_detection_method'] = meta_data_cache['psimi'][experiments['interaction_detection_method']]['name']
+                experiments['source'] = meta_data_cache['psimi'][experiments['source']]['name']
+        experiments['interaction_type'] = {
+            'id': meta_data_cache['psimi'][experiments['interaction_type']]['id'],
+            'name': meta_data_cache['psimi'][experiments['interaction_type']]['name']
+        }
+        experiments['interaction_detection_method'] = {
+            'id': meta_data_cache['psimi'][experiments['interaction_detection_method']]['id'],
+            'name': meta_data_cache['psimi'][experiments['interaction_detection_method']]['id']
+        }
 
 
         return {
