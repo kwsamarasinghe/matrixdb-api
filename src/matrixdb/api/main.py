@@ -448,7 +448,7 @@ def get_experiments_by_id(id):
         }
         experiments['interaction_detection_method'] = {
             'id': meta_data_cache['psimi'][experiments['interaction_detection_method']]['id'],
-            'name': meta_data_cache['psimi'][experiments['interaction_detection_method']]['id']
+            'name': meta_data_cache['psimi'][experiments['interaction_detection_method']]['name']
         }
 
 
