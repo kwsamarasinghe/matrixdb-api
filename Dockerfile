@@ -1,8 +1,8 @@
-FROM python:3.10
+FROM python:3.11
 WORKDIR /usr/src/app
 
 COPY requirements.txt ./
-RUN pip3.10 install --no-cache-dir -r requirements.txt
+RUN pip3.11 install --no-cache-dir -r requirements.txt
 
 COPY . .
 

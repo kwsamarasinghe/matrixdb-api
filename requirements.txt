@@ -7,7 +7,9 @@ pymongo
 pyparsing
 requests
 urllib3
-Werkzeug
 pandas
 python-dotenv
 uwsgi
+pyuwsgi
+uwsgidecorators
+python-dotenv

@@ -1,4 +1,3 @@
-import re
 import traceback
 
 from flask import Flask, request, Response
@@ -6,14 +5,12 @@ from flask_caching import Cache
 
 from gevent.pywsgi import WSGIServer
 from pymongo import MongoClient
-import pandas as pd
 import json
-from functools import reduce
 from itertools import groupby
 
-from src.matrixdb.biomolecule_services.protein_data_manager import ProteinDataManager
-from src.matrixdb.interactome.interaction_data_manager import InteractionDataManager
-from src.matrixdb.interactome.network_manager import NetworkManager
+from src.matrixdb.services.biomolecules.protein_data_manager import ProteinDataManager
+from src.matrixdb.services.interactome.interaction_data_manager import InteractionDataManager
+from src.matrixdb.services.interactome.network_manager import NetworkManager
 from src.matrixdb.utils.solr.solr_query_controller import query_solr
 
 from dotenv import load_dotenv
@@ -35,8 +32,6 @@ app = Flask(__name__)
 app.config.from_mapping(config)
 cache = Cache(app)
 
-database = None
-biomolecule_registry = list()
 meta_data_cache = {
     "psimi": dict(),
     "go": dict(),
@@ -45,9 +40,11 @@ meta_data_cache = {
     "uberon": dict(),
     "bto": dict()
 }
+
+
 def get_db_connection():
     # Connects to the db
-    #print(f'Connecting to database {database_url}')
+    print(f'Connecting to database {database_url}')
     try:
         database_client = MongoClient(database_url)
         core_database_connection = database_client["matrixdb_4_0"]
@@ -55,21 +52,6 @@ def get_db_connection():
         return core_database_connection, secondary_databse_connection
     except Exception:
         print("Problem connecting to db " + database_url)
-
-
-core_database_connection, secondary_databse_connection = get_db_connection()
-protein_data_manager = ProteinDataManager(database_connection=secondary_databse_connection,
-                                              meta_data_cache=meta_data_cache)
-interaction_data_manager = InteractionDataManager(database_connection=core_database_connection)
-
-# Build biomolecule registry
-def build_biomolecule_registry():
-    core_database_connection, secondary_databse_connection = get_db_connection()
-    biomolecules = list()
-    for biomolecule in core_database_connection["biomolecules"].find():
-        biomolecules.append(biomolecule["id"])
-
-    return sorted(biomolecules)
 
 
 def build_meta_data_cache():
@@ -96,6 +78,13 @@ def build_meta_data_cache():
     for bto in core_database_connection["brenda"].find():
         meta_data_cache["bto"][bto["id"]] = bto
 
+build_meta_data_cache()
+print("Meta data cache built")
+
+core_database_connection, secondary_databse_connection = get_db_connection()
+protein_data_manager = ProteinDataManager(database_connection=secondary_databse_connection,
+                                              meta_data_cache=meta_data_cache)
+interaction_data_manager = InteractionDataManager(database_connection=core_database_connection)
 
 @app.route('/api/biomolecules/<id>', methods=['GET'])
 @cache.cached(timeout=50000, query_string=True)
@@ -277,67 +266,6 @@ def get_biomolecule_interactors_by_id(id):
 
 @app.route('/api/biomolecules/proteins/expressions/', methods=['POST'])
 def get_protein_expression():
-    '''
-    database_url = "mongodb://localhost:27018/"
-    try:
-        database_client = MongoClient(database_url)
-        database = database_client["matrixdb-4_0-pre-prod"]
-    except Exception:
-        print("Problem connecting to db " + database_url)
-
-    protein_ids = json.loads(request.data)
-    proteins = database["biomolecules"].find({
-        "id": {
-            '$in': protein_ids
-        }
-    })
-
-    expression_data = dict()
-    for protein in proteins:
-        expressions_by_protein = database["geneExpression"].find_one({
-            "uniprot": protein['id']
-        })
-
-        proteomics_expression_by_protein = database["proteomicsExpression"].find_one({
-            "uniprot": protein['id']
-        })
-
-        gene_expressions = list()
-        if expressions_by_protein is not None:
-
-            expression_values = list()
-            for expression in expressions_by_protein["expressions"]:
-                for e in list(expression.values()):
-                    expression_values.append(e[0])
-
-            # filtered_expression = filter(lambda e: "life cycle" in e["sex"], expressions_by_protein["expressions"])
-            grouped_expressions = groupby(sorted(list(expression_values), key=lambda x: x["uberonName"]),
-                                          key=lambda x: x["uberonName"])
-
-            for tissue_uberon_name, group in grouped_expressions:
-                max_group = max(group, key=lambda x: x["tpm"])
-                gene_expressions.append({
-                    "tissueUberonName": tissue_uberon_name.strip('"'),
-                    "tpm": max_group["tpm"]
-                })
-
-        prot_expressions = list()
-        if proteomics_expression_by_protein is not None:
-            for e in proteomics_expression_by_protein["expressions"]:
-                prot_expressions.append({
-                    "tissueId": e["tissueId"],
-                    "name": e["sampleName"] if "sampleName" in e else "",
-                    "sample": e["sample"] if "sample" in e else "",
-                    "score": e["confidenceScore"] if "confidenceScore" in e else 0,
-                })
-
-        expression_data[protein['id']] ={
-            "gene": protein["relations"]["gene_name"] if protein is not None and "gene_name" in protein["relations"] else None,
-            "geneExpression": gene_expressions,
-            "proteomicsExpression": prot_expressions
-        }
-
-    '''
     core_database_connection, secondary_databse_connection = get_db_connection()
     protein_data_manager = ProteinDataManager(secondary_databse_connection, meta_data_cache)
     expression_data = dict()
@@ -533,98 +461,6 @@ def get_xrefs_by_ids():
 
     return json.dumps(list(xrefs))
 
-'''
-@app.route('/api/search', methods=['GET'])
-@cache.cached(timeout=50000, query_string=True)
-def search_with_text():
-    args = request.args
-    search_text = args['text']
-    # Search biomolecules for the moment
-    biomolecules_by_id = list(database["biomolecules"].find(
-        {
-            "$or": [
-                {
-                    "id":  search_text
-                },
-                {
-                    "id": search_text.lower()
-                },
-                {
-                    "names.name": {"$regex": search_text, '$options': 'i'}
-                },
-                {
-                    "names.common_name": {"$regex": search_text, '$options': 'i'}
-                },
-            ]
-        },
-        {
-            "_id" : 0
-        }
-    ))
-
-    if len(biomolecules_by_id) < 10:
-        biomolecules_by_other = database["biomolecules"].find(
-            {
-
-                    "$or":[
-                        {
-                            "id": { "$regex" : search_text, '$options': 'i' }
-                        },
-                        {
-                            "names.name": {"$regex": search_text, '$options': 'i'}
-                        },
-                        {
-                            "names.common_name": {"$regex": search_text, '$options': 'i'}
-                        },
-                        {
-                            "names.other_name": {"$regex": search_text, '$options': 'i'}
-                        },
-                        {
-                            "names.scientific_name": {"$regex": search_text, '$options': 'i'}
-                        },
-                        {
-                            "relations.belongs_to": {"$regex": search_text, '$options' : 'i'}
-                        },
-                        {
-                            "description": {"$regex": search_text, '$options' : 'i'}
-                        },
-                        {
-                            "annotations.keywords": {"$regex": search_text, '$options' : 'i'}
-                        },
-                        {
-                            "moleculer_details": {"$regex": search_text, '$options': 'i'}
-                        },
-                        {
-                            "xrefs.chebi": search_text
-                        },
-                        {
-                            "xrefs.uniprot": search_text
-                        },
-                        {
-                            "xrefs.kegg": search_text
-                        }
-                    ]
-
-            },
-            {
-                "_id": 0
-            }
-        )
-        biomolecules_by_id.extend(biomolecules_by_other)
-
-    results = []
-    for biomolecule in list(biomolecules_by_id):
-        result = dict()
-        result["id"] = biomolecule["id"]
-        result["names"] = biomolecule["names"]
-        if "description" in biomolecule:
-            result["description"] = biomolecule["description"]
-        if "xrefs" in biomolecule:
-            result["xrefs"] = biomolecule["xrefs"]
-        results.append(result)
-
-    return json.dumps(results)
-'''
 
 @app.route('/api/search', methods=['GET'])
 def search_with_text_solr():
@@ -659,6 +495,7 @@ def search_with_text_solr():
         "biomolecules": biomolecule_solr_docs,
         "publications": publication_solr_docs
     })
+
 
 def convert_name(name):
     if len(name.split('_')) > 0:
@@ -738,8 +575,8 @@ def network_request_key():
 @cache.cached(timeout=60, make_cache_key=network_request_key)
 def generate_network():
     biomolecules = json.loads(request.data)["biomolecules"]
-
     core_database_connection, secondary_databse_connection = get_db_connection()
+    build_meta_data_cache()
     network_manager = NetworkManager(database_connection=core_database_connection,
                                      meta_data_cache=meta_data_cache,
                                      protein_data_manager=protein_data_manager,
@@ -835,16 +672,7 @@ def get_publication_details_by_id(pubmed_id):
     return json.dumps(publication_to_return)
 
 
-def init_api():
-    print("Building biomolecule registry")
-    biomolecule_registry = build_biomolecule_registry()
-
-    print("Building meta data cache")
-    build_meta_data_cache()
-
-
 if __name__ == '__main__':
-    init_api()
     # Serve the src with gevent
     http_server = WSGIServer(('127.0.0.1', 8000), app)
     print("Server started at 8000")
