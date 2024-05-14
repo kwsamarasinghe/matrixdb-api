@@ -12,6 +12,7 @@ from functools import reduce
 from itertools import groupby
 
 from src.matrixdb.biomolecule_services.protein_data_manager import ProteinDataManager
+from src.matrixdb.interactome.interaction_data_manager import InteractionDataManager
 from src.matrixdb.interactome.network_manager import NetworkManager
 from src.matrixdb.utils.solr.solr_query_controller import query_solr
 
@@ -819,9 +820,11 @@ if __name__ == '__main__':
 
     protein_data_manager = ProteinDataManager(database_connection=secondary_databse_connection,
                                               meta_data_cache=meta_data_cache)
+    interaction_data_manager = InteractionDataManager(database_connection=core_database_connection)
     network_manager = NetworkManager(database_connection=core_database_connection,
                                      meta_data_cache=meta_data_cache,
-                                     protein_data_manager=protein_data_manager)
+                                     protein_data_manager=protein_data_manager,
+                                     interaction_data_manager=interaction_data_manager)
 
     # Serve the src with gevent
     http_server = WSGIServer(('127.0.0.1', 8000), app)
