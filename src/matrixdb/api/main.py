@@ -45,10 +45,26 @@ meta_data_cache = {
     "uberon": dict(),
     "bto": dict()
 }
+def get_db_connection():
+    # Connects to the db
+    #print(f'Connecting to database {database_url}')
+    try:
+        database_client = MongoClient(database_url)
+        core_database_connection = database_client["matrixdb_4_0"]
+        secondary_databse_connection = database_client["matrixdb-4_0-pre-prod"]
+        return core_database_connection, secondary_databse_connection
+    except Exception:
+        print("Problem connecting to db " + database_url)
 
+
+core_database_connection, secondary_databse_connection = get_db_connection()
+protein_data_manager = ProteinDataManager(database_connection=secondary_databse_connection,
+                                              meta_data_cache=meta_data_cache)
+interaction_data_manager = InteractionDataManager(database_connection=core_database_connection)
 
 # Build biomolecule registry
 def build_biomolecule_registry():
+    core_database_connection, secondary_databse_connection = get_db_connection()
     biomolecules = list()
     for biomolecule in core_database_connection["biomolecules"].find():
         biomolecules.append(biomolecule["id"])
@@ -57,6 +73,7 @@ def build_biomolecule_registry():
 
 
 def build_meta_data_cache():
+    core_database_connection, secondary_databse_connection = get_db_connection()
     # psimi
     for psimi in core_database_connection["psimi"].find():
         meta_data_cache["psimi"][psimi["id"]] = psimi
@@ -83,6 +100,7 @@ def build_meta_data_cache():
 @app.route('/api/biomolecules/<id>', methods=['GET'])
 @cache.cached(timeout=50000, query_string=True)
 def get_biomolecule_by_id(id):
+    core_database_connection, secondary_databse_connection = get_db_connection()
     biomolecule = core_database_connection["biomolecules"].find_one({
         "id": id
     },
@@ -141,6 +159,7 @@ def get_biomolecule_by_id(id):
 
 @app.route('/api/biomolecules/', methods=['POST'])
 def get_biomolecules_by_id():
+    core_database_connection, secondary_databse_connection = get_db_connection()
     biomoelcule_ids = json.loads(request.data)["ids"]
     biomolecules = list(core_database_connection["biomolecules"].find({
         "id": {
@@ -198,6 +217,7 @@ def get_biomolecules_by_id():
 
 @app.route('/api/biomolecules/<id>/interactors/', methods=['GET'])
 def get_biomolecule_interactors_by_id(id):
+    core_database_connection, secondary_databse_connection = get_db_connection()
     interactions = list(core_database_connection["interactions"].find(
         {
             "participants": id
@@ -318,6 +338,7 @@ def get_protein_expression():
         }
 
     '''
+    core_database_connection, secondary_databse_connection = get_db_connection()
     protein_data_manager = ProteinDataManager(secondary_databse_connection, meta_data_cache)
     expression_data = dict()
     for protein in json.loads(request.data):
@@ -331,6 +352,7 @@ def get_protein_expression():
 @app.route('/api/associations/', methods=['POST'])
 def get_associations_by_biomolecules():
     try:
+        core_database_connection, secondary_databse_connection = get_db_connection()
         biomolecule_ids = json.loads(request.data)["biomolecules"]
         interactions = list(core_database_connection["interactions"].find(
             {
@@ -392,6 +414,7 @@ def get_associations_by_biomolecules():
 
 @app.route('/api/associations/<id>', methods=['GET'])
 def get_association_by_id(id):
+    core_database_connection = get_db_connection()
     association = core_database_connection["interactions"].find_one(
         {
             "id": id
@@ -414,6 +437,7 @@ def get_association_by_id(id):
 
 @app.route('/api/experiments/<id>', methods=['GET'])
 def get_experiments_by_id(id):
+    core_database_connection = get_db_connection()
     experiments = core_database_connection["experiments"].find_one(
         {
             "id": id
@@ -469,6 +493,7 @@ def get_experiments_by_id(id):
 def get_experiments_by_ids():
     experiment_ids = json.loads(request.data)["ids"]
 
+    core_database_connection = get_db_connection()
     experiments = core_database_connection["experiments_new"].find(
         {
             "id": {
@@ -494,6 +519,7 @@ def get_experiments_by_ids():
 @app.route('/api/xrefs', methods=['GET'])
 def get_xrefs_by_ids():
     ids_to_search = request.args.getlist('id')
+    core_database_connection = get_db_connection()
     xrefs = core_database_connection["Keywrds"].find(
         {
             "id": {
@@ -643,6 +669,7 @@ def convert_name(name):
 
 @app.route('/api/statistics/', methods=['GET'])
 def get_stats():
+    core_database_connection, secondary_databse_connection = get_db_connection()
     statistics = list(core_database_connection["statistics"].find())
     statistics_reply = dict()
     for statistic in statistics:
@@ -711,12 +738,19 @@ def network_request_key():
 @cache.cached(timeout=60, make_cache_key=network_request_key)
 def generate_network():
     biomolecules = json.loads(request.data)["biomolecules"]
+
+    core_database_connection, secondary_databse_connection = get_db_connection()
+    network_manager = NetworkManager(database_connection=core_database_connection,
+                                     meta_data_cache=meta_data_cache,
+                                     protein_data_manager=protein_data_manager,
+                                     interaction_data_manager=interaction_data_manager)
     return network_manager.generate_network(biomolecules)
 
 
 @app.route('/api/publications/<pubmed_id>', methods=['GET'])
 @cache.cached(timeout=60)
 def get_publication_details_by_id(pubmed_id):
+    core_database_connection, secondary_databse_connection = get_db_connection()
     experiments_by_pubmed = core_database_connection['experiments'].find({
         'pmid': pubmed_id
     })
@@ -801,31 +835,16 @@ def get_publication_details_by_id(pubmed_id):
     return json.dumps(publication_to_return)
 
 
-if __name__ == '__main__':
-
-    # Connects to the db
-    print(f'Connecting to database {database_url}')
-    try:
-        database_client = MongoClient(database_url)
-        core_database_connection = database_client["matrixdb_4_0"]
-        secondary_databse_connection = database_client["matrixdb-4_0-pre-prod"]
-    except Exception:
-        print("Problem connecting to db " + database_url)
-
+def init_api():
     print("Building biomolecule registry")
     biomolecule_registry = build_biomolecule_registry()
 
     print("Building meta data cache")
     build_meta_data_cache()
 
-    protein_data_manager = ProteinDataManager(database_connection=secondary_databse_connection,
-                                              meta_data_cache=meta_data_cache)
-    interaction_data_manager = InteractionDataManager(database_connection=core_database_connection)
-    network_manager = NetworkManager(database_connection=core_database_connection,
-                                     meta_data_cache=meta_data_cache,
-                                     protein_data_manager=protein_data_manager,
-                                     interaction_data_manager=interaction_data_manager)
 
+if __name__ == '__main__':
+    init_api()
     # Serve the src with gevent
     http_server = WSGIServer(('127.0.0.1', 8000), app)
     print("Server started at 8000")

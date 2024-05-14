@@ -158,9 +158,9 @@ class NetworkManager:
                             experiment_ids.add(spoke_exapnded)
 
             experiments = dict()
-            for experiment in self.database_connection["experiments"].find({
+            for experiment in list(self.database_connection["experiments"].find({
                 "id": {"$in": list(experiment_ids)}
-            }):
+            })):
                 del experiment["_id"]
                 experiments[experiment["id"]] = experiment
 
