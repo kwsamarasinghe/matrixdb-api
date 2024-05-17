@@ -1,13 +1,15 @@
 
 class InteractionDataManager:
 
-    def __init__(self, database_connection):
-        self.database_connection = database_connection
+    def __init__(self, app_config, database_manager):
+        self.app_config = app_config
+        self.database_manager = database_manager
 
         # Generates interaction cache
         self.neighborhood_cache = dict()
         print("Building interaction cache")
-        for interaction in self.database_connection["interactions"].find({}):
+        core_database_connection = self.database_manager.get_primary_connection()
+        for interaction in core_database_connection["interactions"].find({}):
             if len(interaction["participants"]) == 2:
                 participant_0 = interaction["participants"][0]
                 participant_1 = interaction["participants"][1]

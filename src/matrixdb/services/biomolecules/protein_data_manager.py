@@ -1,14 +1,18 @@
 from itertools import groupby
 
+from src.matrixdb.utils.database.database_manager import DatabaseManager
+
 
 class ProteinDataManager:
 
-    def __init__(self, database_connection, meta_data_cache):
-        self.meta_data_cache = meta_data_cache
-        self.database_connection = database_connection
+    def __init__(self, app_config, cache_manager, database_manager):
+        self.app_config = app_config
+        self.meta_data_cache = cache_manager.get_meta_data()
+        self.database_manager = database_manager
 
     def get_gene_expressions(self, protein_id):
-        expressions_by_protein = self.database_connection["geneExpression"].find_one({
+        secondary_database_connection = self.database_manager.get_secondary_connection()
+        expressions_by_protein = secondary_database_connection["geneExpression"].find_one({
             "uniprot": protein_id
         })
 
@@ -36,7 +40,8 @@ class ProteinDataManager:
         return gene_expressions
 
     def get_gene_expression_for_proteins(self, protein_ids):
-        expressions_by_proteins = self.database_connection["geneExpression"].find({
+        secondary_database_connection = self.database_manager.get_secondary_connection()
+        expressions_by_proteins = secondary_database_connection["geneExpression"].find({
             "uniprot": {
                 '$in': protein_ids
             }
@@ -54,7 +59,6 @@ class ProteinDataManager:
                         expression_by_tissue['tissueId'] = tissue_id
                         expression_values.append(expression_by_tissue)
 
-                # filtered_expression = filter(lambda e: "life cycle" in e["sex"], expressions_by_protein["expressions"])
                 grouped_expressions = groupby(sorted(list(expression_values), key=lambda x: x["uberonName"]),
                                               key=lambda x: x["uberonName"])
 
@@ -68,37 +72,29 @@ class ProteinDataManager:
         return gene_expressions
 
     def get_proteomics_expressions(self, protein_id):
-
-        proteomics_expression_by_protein = self.database_connection["proteomicsExpression"].find_one({
+        secondary_database_connection = self.database_manager.get_secondary_connection()
+        proteomics_expression_by_protein = secondary_database_connection["proteomicsExpression"].find_one({
             "uniprot": protein_id
         })
 
         prot_expressions = list()
         if proteomics_expression_by_protein is not None:
-            for e in proteomics_expression_by_protein["expressions"]:
-
-                if "BTO" in e["tissueId"]:
-                    if e['tissueId'] in self.meta_data_cache["bto"]:
-                        tissueName = self.meta_data_cache["bto"][e["tissueId"]]["name"]
-
-                if "UBERON" in e["tissueId"]:
-                    if e['tissueId'] in self.meta_data_cache["uberon"]:
-                        tissueName = self.meta_data_cache["uberon"][e["tissueId"]]["name"]
-
-                if tissueName is not None:
+            for expression in proteomics_expression_by_protein["expressions"]:
+                tissue_name = self.get_tissue_name(expression)
+                if tissue_name is not None:
                     prot_expressions.append(
                         {
-                            "tissue": tissueName,
-                            "sampleName": e["sampleName"] if "sampleName" in e else "",
-                            "sample": e["sample"] if "sample" in e else "",
-                            "score": e["confidenceScore"] if "confidenceScore" in e else 0,
+                            "tissue": tissue_name,
+                            "sampleName": expression["sampleName"] if "sampleName" in expression else "",
+                            "sample": expression["sample"] if "sample" in expression else "",
+                            "score": expression["confidenceScore"] if "confidenceScore" in expression else 0
                         })
 
         return prot_expressions
 
     def get_proteomics_expressions_for_proteins(self, protein_ids):
-
-        proteomics_expression_by_proteins = self.database_connection["proteomicsExpression"].find({
+        secondary_database_connection = self.database_manager.get_secondary_connection()
+        proteomics_expression_by_proteins = secondary_database_connection["proteomicsExpression"].find({
             "uniprot": {
                 '$in': protein_ids
             }
@@ -108,23 +104,25 @@ class ProteinDataManager:
         if proteomics_expression_by_proteins is not None:
             for proteomics_expression_by_protein in list(proteomics_expression_by_proteins):
                 prot_expressions[proteomics_expression_by_protein['uniprot']] = list()
-                for e in proteomics_expression_by_protein["expressions"]:
+                for expression in proteomics_expression_by_protein["expressions"]:
 
-                    if "BTO" in e["tissueId"]:
-                        if e['tissueId'] in self.meta_data_cache["bto"]:
-                            tissueName = self.meta_data_cache["bto"][e["tissueId"]]["name"]
-
-                    if "UBERON" in e["tissueId"]:
-                        if e['tissueId'] in self.meta_data_cache["uberon"]:
-                            tissueName = self.meta_data_cache["uberon"][e["tissueId"]]["name"]
-
-                    if tissueName is not None:
+                    tissue_name = self.get_tissue_name(expression)
+                    if tissue_name is not None:
                         prot_expressions[proteomics_expression_by_protein['uniprot']].append(
                             {
-                                "tissue": tissueName,
-                                "sampleName": e["sampleName"] if "sampleName" in e else "",
-                                "sample": e["sample"] if "sample" in e else "",
-                                "score": e["confidenceScore"] if "confidenceScore" in e else 0,
+                                "tissue": tissue_name,
+                                "sampleName": expression["sampleName"] if "sampleName" in expression else "",
+                                "sample": expression["sample"] if "sample" in expression else "",
+                                "score": expression["confidenceScore"] if "confidenceScore" in expression else 0,
                             })
 
         return prot_expressions
+
+    def get_tissue_name(self, expression_data):
+        if "BTO" in expression_data["tissueId"]:
+            if expression_data['tissueId'] in self.meta_data_cache["bto"]:
+                return self.meta_data_cache["bto"][expression_data["tissueId"]]["name"]
+
+        if "UBERON" in expression_data["tissueId"]:
+            if expression_data['tissueId'] in self.meta_data_cache["uberon"]:
+                return self.meta_data_cache["uberon"][expression_data["tissueId"]]["name"]

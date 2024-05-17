@@ -1,13 +1,10 @@
 
 class NetworkManager:
 
-    def __init__(self, database_connection,
-                 meta_data_cache,
-                 protein_data_manager,
-                 interaction_data_manager=None):
+    def __init__(self, database_manager, cache_manager, protein_data_manager, interaction_data_manager=None):
         # initialize database connection
-        self.database_connection = database_connection
-        self.meta_data_cache = meta_data_cache
+        self.database_manager = database_manager
+        self.meta_data_cache = cache_manager.get_meta_data()
         self.protein_data_manager = protein_data_manager
         self.interaction_data_manager = interaction_data_manager
 
@@ -116,6 +113,7 @@ class NetworkManager:
                     interactions: list of all interactions
                  }
         '''
+        core_database_connection = self.database_manager.get_primary_connection()
         # Get the 1-neighborhood of each biomolecule and derive the interactions and partners
         interactor_ids = set()
         interaction_ids = set()
@@ -136,13 +134,13 @@ class NetworkManager:
         if len(interaction_ids) > 0:
 
             # Extract the interactors
-            interactors = list(self.database_connection["biomolecules"].find({
+            interactors = list(core_database_connection["biomolecules"].find({
                 "id": {"$in": list(interactor_ids)}
             }))
             transformed_interactors = self.transform_interactors(interactors)
 
             # Extract the interactions
-            interactions = list(self.database_connection["interactions"].find({
+            interactions = list(core_database_connection["interactions"].find({
                 "id": {"$in": list(interaction_ids)}
             }))
 
@@ -158,7 +156,7 @@ class NetworkManager:
                             experiment_ids.add(spoke_exapnded)
 
             experiments = dict()
-            for experiment in list(self.database_connection["experiments"].find({
+            for experiment in list(core_database_connection["experiments"].find({
                 "id": {"$in": list(experiment_ids)}
             })):
                 del experiment["_id"]
