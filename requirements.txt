@@ -13,3 +13,4 @@ uwsgi
 pyuwsgi
 uwsgidecorators
 python-dotenv
+numpy

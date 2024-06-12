@@ -2,18 +2,18 @@ import traceback
 
 from flask import Flask, request, Response
 from flask_caching import Cache
-
-from gevent.pywsgi import WSGIServer
-from pymongo import MongoClient
+from flask_cors import CORS
 import json
 from itertools import groupby
 
+from gevent.pywsgi import WSGIServer
+
 from src.matrixdb.services.biomolecules.protein_data_manager import ProteinDataManager
-from src.matrixdb.services.interactome.interaction_data_manager import InteractionDataManager
+from src.matrixdb.services.interactome.interaction_manager import InteractionDataManager
 from src.matrixdb.services.interactome.network_manager import NetworkManager
 from src.matrixdb.utils.cache.cache_manager import CacheManager
 from src.matrixdb.utils.database.database_manager import DatabaseManager
-from src.matrixdb.utils.solr.solr_query_controller import query_solr
+from src.matrixdb.utils.solr.solr_query_manager import SolrQueryManager
 
 from dotenv import load_dotenv
 import os
@@ -35,6 +35,14 @@ config = {
 }
 
 app = Flask(__name__)
+cors = CORS(app, resources={
+    r"/api/*": {
+        "origins": ["http://localhost:3000"],
+        "methods": ["GET", "POST", "PUT", "DELETE"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
+    }
+})
 app.config.from_mapping(config)
 cache = Cache(app)
 
@@ -43,6 +51,8 @@ cache_manager = CacheManager(app_config, database_manager)
 protein_data_manager = ProteinDataManager(app_config, cache_manager, database_manager)
 interaction_data_manager = InteractionDataManager(app_config, database_manager)
 network_manager = NetworkManager(database_manager, cache_manager, protein_data_manager, interaction_data_manager)
+solr_manager = SolrQueryManager(app_config)
+
 
 @app.route('/api/biomolecules/<id>', methods=['GET'])
 @cache.cached(timeout=50000, query_string=True)
@@ -376,6 +386,7 @@ def get_experiments_by_id(id):
             "message" : "No assoication found for " + id
         }
 
+
 @app.route('/api/experiments/', methods=['POST'])
 def get_experiments_by_ids():
     experiment_ids = json.loads(request.data)["ids"]
@@ -424,34 +435,13 @@ def get_xrefs_by_ids():
 def search_with_text_solr():
     args = request.args
     search_text = args['text']
-    solr_url = app_config["solr_url"]
-    biomolecules_core_url = f'{solr_url}/solr/biomolecules'
-    publications_core_url = f'{solr_url}/solr/publications'
 
-    biomolecule_query_params = {
-        'q': f'{search_text}',
-        'defType': 'dismax',
-        'qf': 'biomolecule_id^10.0 name^5 common_name^4 recommended_name^3 other_name^2 species^2 description^2 gene^6 chebi complex_portal go_names go_ids keyword_ids keyword_names',
-        'fq':  'interaction_count:[1 TO *]',
-        'rows': 100
-    }
-    biomolecule_solr_docs = query_solr(biomolecules_core_url, biomolecule_query_params)
-    # Only consider biomolecules with interactions
-    biomolecule_solr_docs = list(filter(lambda doc: doc['interaction_count'] > 0, biomolecule_solr_docs))
-    biomolecule_solr_docs = sorted(biomolecule_solr_docs, key=lambda doc: doc['interaction_count'])
-
-    publication_query_params = {
-        'q': f'{search_text}',
-        'defType': 'dismax',
-        'qf': 'publication_id title authors journal',
-        'rows': 100
-    }
-    publication_solr_docs = query_solr(publications_core_url, publication_query_params)
-    publication_solr_docs = sorted(publication_solr_docs, key=lambda doc: doc['interaction_count'])
+    biomolecules = solr_manager.query_biomolecules(search_text)
+    publications = solr_manager.query_publications(search_text)
 
     return json.dumps({
-        "biomolecules": biomolecule_solr_docs,
-        "publications": publication_solr_docs
+        "biomolecules": biomolecules,
+        "publications": publications
     })
 
 
@@ -481,60 +471,34 @@ def get_stats():
 
 @app.route('/api/biomolecules/suggestions/<search_query>', methods=['GET'])
 def get_biomolcules_suggestions(search_query):
-    solr_url = app_config["SOLR_URL"]
-    biomolecules_core_url = f'{solr_url}/solr/biomolecules'
-
-    biomolecule_query_params = {
-        'q': f'{search_query}',
-        'defType': 'dismax',
-        'qf': 'biomolecule_id^10.0 name^5 common_name^4 recommended_name^3 other_name^2 species^2 description^2 gene^6 chebi complex_portal go_names go_ids keyword_ids keyword_names',
-        'fq': 'interaction_count:[1 TO *]',
-        'rows': 100
+    return {
+        "biomolecules": solr_manager.query_biomolecules(search_query)
     }
-    biomolecule_solr_docs = query_solr(biomolecules_core_url, biomolecule_query_params)
-    biomolecule_solr_docs = list(filter(lambda doc: doc['interaction_count'] > 0, biomolecule_solr_docs))
-    biomolecule_solr_docs = sorted(biomolecule_solr_docs, key=lambda doc: doc['interaction_count'])
-
-    if biomolecule_solr_docs is not None:
-        suggestions = []
-        for bd in biomolecule_solr_docs:
-            if 'name' not in bd:
-                continue
-            '''
-            suggestion = {
-                'id': bd['biomolecule_id'][0],
-                'name': bd['name'][0],
-            }
-            if 'xrefs' in bd:
-                suggestion['xref'] = bd['xrefs'][0]
-            '''
-
-
-            suggestions.append(bd)
-        return {
-            "suggestions": suggestions
-        }
-    else:
-        return {
-            "suggestions": []
-        }
 
 
 def network_request_key():
-   """A function which is called to derive the key for a computed value.
+    """A function which is called to derive the key for a computed value.
       The key in this case is the concat value of all the json request
       parameters. Other strategy could to use any hashing function.
-   :returns: unique string for which the value should be cached.
-   """
-   user_data = request.get_json()
-   return ",".join([f"{value}" for value in user_data['biomolecules']])
-
+    :returns: unique string for which the value should be cached.
+    """
+    user_data = request.get_json()
+    option = True
+    if "onlyDirectPartners" in user_data:
+        option = user_data["onlyDirectPartners"]
+    key = ",".join([f"{value}" for value in user_data['biomolecules']])
+    return f'{key}_{option}'
 
 @app.route('/api/network', methods=['POST'])
-@cache.cached(timeout=60, make_cache_key=network_request_key)
+@cache.cached(timeout=120, make_cache_key=network_request_key)
 def generate_network():
-    biomolecules = json.loads(request.data)["biomolecules"]
-    return network_manager.generate_network(biomolecules)
+    request_body = json.loads(request.data)
+    biomolecules = request_body["biomolecules"]
+    second_neighborhood = False
+    if "onlyDirectPartners" in request_body:
+        second_neighborhood = not request_body["onlyDirectPartners"]
+
+    return network_manager.generate_network(biomolecules, second_neighborhood)
 
 
 @app.route('/api/publications/<pubmed_id>', methods=['GET'])
@@ -624,9 +588,19 @@ def get_publication_details_by_id(pubmed_id):
 
     return json.dumps(publication_to_return)
 
+@app.route('/api/metadata/<metadata_type>', methods=['GET'])
+@cache.cached(timeout=60)
+def get_meta_data(metadata_type):
+    meta_data_response = dict()
+    meta_data = cache_manager.get_meta_data()
+    if metadata_type == 'ncbi':
+        if 'ncbiTaxonomy' in meta_data:
+            meta_data_response['ncbi'] = meta_data['ncbiTaxonomy']
+
+    return meta_data_response
+
 
 if __name__ == '__main__':
-    # Serve the src with gevent
     http_server = WSGIServer(('127.0.0.1', 8000), app)
     print("Server started at 8000")
     http_server.serve_forever()
