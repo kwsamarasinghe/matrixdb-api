@@ -1,3 +1,6 @@
+import json
+import re
+
 
 class NetworkManager:
 
@@ -22,98 +25,261 @@ class NetworkManager:
 
         return result
 
-    def transform_interactors(self, interactors):
-        # Extract the expresssions for interactors
-        gene_expressions = self.protein_data_manager.get_gene_expression_for_proteins(list(i['id'] for i in interactors))
-        proteomics_expressions = self.protein_data_manager.get_proteomics_expressions_for_proteins(list(i['id'] for i in interactors))
+    def get_interactors(self, interactor_ids, interactor_mapping):
+        core_database_connection = self.database_manager.get_primary_connection()
+        # Extract the interactors
+        print("reading interactors")
+        interactors = list(core_database_connection["biomolecules"].find({
+            "id": {"$in": list(interactor_ids)}
+        }))
+        print("Interactors read")
+        transformed_interactors = self.transform_interactors(interactors, interactor_mapping)
 
+        # Normalize the interactors
+        print("interactors are done")
+        return transformed_interactors
+
+    def get_interactions(self, interaction_ids, interactor_mapping):
+        core_database_connection = self.database_manager.get_primary_connection()
+        # Extract the interactions
+
+        # Extracts a map of experiments
+        experiments = dict()
+        experiment_map = dict()
+        type_map = {
+            "1": "Only Experimental",
+            "2": "Only Predicted",
+            "3": "Experimental and Predicted",
+        }
+        transformed_interactions = list()
+        psimi_names = dict()
+        psimi_name_mapping = dict()
+        for interaction in core_database_connection["interactions"].aggregate([
+                {
+                    "$match": {
+                      "id": {"$in": list(interaction_ids)}
+                    }
+                },
+                {
+                    "$lookup": {
+                        "from": "experiments",
+                        "localField": "experiments.direct.binary",
+                        "foreignField": "id",
+                        "pipeline": [{"$project": {"interaction_detection_method": 1}}],
+                        "as": "binary_detection_method"
+                    }
+                },
+                {
+                    "$lookup": {
+                        "from": "experiments",
+                        "localField": "experiments.direct.spoke_expanded_from",
+                        "foreignField": "id",
+                        "pipeline": [{"$project": {"interaction_detection_method": 1}}],
+                        "as": "spoke_detection_method"
+                    }
+                }
+        ]):
+            transformed_interaction = {
+                "id": interaction["id"],
+                "participants": list(interactor_mapping[participant] for participant in interaction["participants"]),
+                "experiments": {
+                    "direct": {
+                        "binary": list(),
+                        "spoke_expanded_from": list()
+                    }
+                }
+            }
+            if "experiments" in interaction:
+                if "binary" in interaction["experiments"]["direct"]:
+                    for binary_experiment in interaction["experiments"]["direct"]["binary"]:
+                        if binary_experiment not in experiments:
+                            experiments[binary_experiment] = len(experiments) + 1
+                            experiment_map[experiments[binary_experiment]] = binary_experiment
+                        transformed_interaction["experiments"]["direct"]["binary"].append(experiments[binary_experiment])
+
+                if "spoke_expanded_from" in interaction["experiments"]["direct"]:
+                    for spoke_exapnded in interaction["experiments"]["direct"]["spoke_expanded_from"]:
+                        if spoke_exapnded not in experiments:
+                            experiments[spoke_exapnded] = len(experiments) + 1
+                            experiment_map[experiments[spoke_exapnded]] = spoke_exapnded
+                        transformed_interaction["experiments"]["direct"]["spoke_expanded_from"].append(experiments[spoke_exapnded])
+
+            if 'score' in interaction:
+                if interaction['score'] != '-':
+                    transformed_interaction['score'] = interaction['score']
+
+            if 'prediction' in interaction and 'experiments' in interaction:
+                transformed_interaction['type'] = 3
+
+            if 'prediction' in interaction and 'experiments' not in interaction:
+                transformed_interaction['type'] = 2
+
+            if 'prediction' not in interaction and 'experiments' in interaction:
+                transformed_interaction['type'] = 1
+
+            interaction_detection_methods = list()
+            if "binary_detection_method" in interaction:
+                if len(interaction["binary_detection_method"]) > 0:
+                    for detection_method in interaction["binary_detection_method"]:
+                        # Extract the psimi id, should be fixed in data
+                        if "MI" in detection_method["interaction_detection_method"]:
+                            match = re.search(r'MI:\d+', detection_method["interaction_detection_method"])
+                            if match:
+                                mi_id = match.group()
+                        else:
+                            mi_id = detection_method["interaction_detection_method"]
+
+                        psimi_name = self.meta_data_cache["psimi"][mi_id]["name"]
+                        if psimi_name not in psimi_names:
+                            psimi_names[psimi_name] = len(psimi_names) + 1
+                            psimi_name_mapping[psimi_names[psimi_name]] = psimi_name
+
+                        interaction_detection_methods.append(psimi_names[psimi_name])
+
+            if "spoke_detection_method" in interaction:
+                if len(interaction["spoke_detection_method"]) > 0:
+                    for detection_method in interaction["spoke_detection_method"]:
+                        # Extract the psimi id, should be fixed in data
+                        if "psi-mi" in detection_method["interaction_detection_method"]:
+                            match = re.search(detection_method["interaction_detection_method"], "r'MI:\d+'")
+                            if match:
+                                mi_id = match.group()
+                        else:
+                            mi_id = detection_method["interaction_detection_method"]
+
+                        psimi_name = self.meta_data_cache["psimi"][mi_id]["name"]
+                        if psimi_name not in psimi_names:
+                            psimi_names[psimi_name] = len(psimi_names) + 1
+                            psimi_name_mapping[psimi_names[psimi_name]] = psimi_name
+
+                        interaction_detection_methods.append(psimi_names[psimi_name])
+            transformed_interaction["detection_method"] = interaction_detection_methods
+
+            transformed_interactions.append(transformed_interaction)
+
+        return {
+            "interactions": transformed_interactions,
+            "context": {
+                "interactions": {
+                    "type": type_map,
+                    "detection_method": psimi_name_mapping,
+                }
+            }
+        }
+
+    def transform_interactors(self, interactors, interactor_mapping):
+        # Extract the expressions for interactors
+        gene_expressions = self.protein_data_manager.get_gene_expression_for_proteins(
+            list(i['id'] for i in interactors))
+        print("gene expression read")
+        proteomics_expressions = self.protein_data_manager.get_proteomics_expressions_for_proteins(
+            list(i['id'] for i in interactors))
+        print("proteomics expression are read")
         transformed_interactors = list()
+        tissue_names = dict()
+        tissue_name_mapping = dict()
+
+        proteomics_expression_tissue_names = dict()
+        prot_expression_tissue_name_mapping = dict()
+
+        proteomics_expression_sample_names = dict()
+        prot_expression_sample_name_mapping = dict()
+
         for interactor in interactors:
-            interactor_id = interactor['id']
+
             transformed_interactor = {
-                'id': interactor_id,
+                'id': interactor['id'],
                 'type': interactor['type']
             }
+
+            if 'names' in interactor:
+                if 'recommended_name' in interactor['names']:
+                    transformed_interactor['name'] = interactor['names']['recommended_name']
+                elif 'name' in interactor['names']:
+                    transformed_interactor['name'] = interactor['names']['name']
 
             if 'molecular_details' in interactor and 'pdb' in interactor['molecular_details']:
                 transformed_interactor['pdb'] = len(interactor['molecular_details']) > 0
 
             if 'ecm' in interactor:
-                transformed_interactor['ecm'] = True
+                transformed_interactor['ecm'] = 'Yes'
 
-            if 'relations' in interactor and 'gene_name' in interactor['relations']:
-                transformed_interactor['geneName'] = interactor['relations']['gene_name']
+            #if 'relations' in interactor and 'gene_name' in interactor['relations']:
+            #    if interactor['relations']['gene_name'] not in gene_names:
+            #        gene_names[interactor['relations']['gene_name']] = len(gene_names) + 1
+            #    transformed_interactor['geneName'] = gene_names[interactor['relations']['gene_name']]
 
             # Get expressions and add to interactor
             if interactor['type'] == 'protein':
-                if interactor_id in gene_expressions:
-                    transformed_interactor['geneExpression'] = gene_expressions[interactor_id]
-                if interactor_id in proteomics_expressions:
-                    transformed_interactor['proteomicsExpression'] = proteomics_expressions[interactor_id]
+                if interactor['id'] in gene_expressions:
+                    expressions = gene_expressions[interactor['id']]
+                    transformed_interactor['geneExpression'] = list()
+                    for expression in expressions:
+                        tissue_name = expression["tissue"]
+                        if tissue_name not in tissue_names:
+                            tissue_names[tissue_name] = len(tissue_names) + 1
+                            tissue_name_mapping[tissue_names[tissue_name]] = tissue_name
 
+                        transformed_interactor['geneExpression'].append({
+                            'tissue': tissue_names[tissue_name],
+                            'tpm': expression['tpm']
+                        })
+
+                transformed_interactor['proteomicsExpression'] = list()
+                if interactor['id'] in proteomics_expressions:
+                    expressions = proteomics_expressions[interactor['id']]
+                    for expression in expressions:
+                        if expression["tissue"] not in proteomics_expression_tissue_names:
+                            number_mapping = len(proteomics_expression_tissue_names) + 1
+                            proteomics_expression_tissue_names[expression["tissue"]] = number_mapping
+                            prot_expression_tissue_name_mapping[number_mapping] = expression["tissue"]
+
+                        if expression["sampleName"] not in proteomics_expression_sample_names:
+                            number_mapping = len(proteomics_expression_sample_names) + 1
+                            proteomics_expression_sample_names[expression["sampleName"]] = number_mapping
+                            prot_expression_sample_name_mapping[number_mapping] = expression["sampleName"]
+
+                        transformed_interactor['proteomicsExpression'].append({
+                            'tissue': proteomics_expression_tissue_names[expression["tissue"]],
+                            'sampleName': proteomics_expression_sample_names[expression["sampleName"]],
+                            'score': expression["score"],
+                        })
+
+            transformed_interactor["id"] = interactor_mapping[interactor['id']]
             transformed_interactors.append(transformed_interactor)
+        print("done transforming")
 
-        return transformed_interactors
-
-    def transform_interaction(self, interaction, experiment_map):
-        transformed_interaction = {
-            'id': interaction['id'],
-            'participants': interaction['participants'],
-            'type': ''
-        }
-
-        if "experiments" in interaction:
-            transformed_interaction['experiments'] = {
-                "direct" : {
-                    "binary": list(),
-                    "spoke_expanded_from": list()
+        context = {
+            "interactors": {
+                "interactor_mapping": {value: key for key, value in interactor_mapping.items()},
+                "geneExpression": {
+                    "tissue": tissue_name_mapping,
+                },
+                "proteomicsExpression": {
+                    "tissue": prot_expression_tissue_name_mapping,
+                    "sampleName": prot_expression_sample_name_mapping,
                 }
             }
+        }
 
-            transformed_interaction["detection_method"] = list()
-            if "binary" in interaction['experiments']["direct"]:
-                for binary in interaction['experiments']['direct']['binary']:
-                    experiment = experiment_map[binary]
-                    transformed_interaction['experiments']['direct']['binary'].append(experiment["id"])
-                    method = self.meta_data_cache["psimi"][experiment["interaction_detection_method"]]["name"]
-                    transformed_interaction["detection_method"].append(method)
+        return {
+            "interactors": transformed_interactors,
+            "context": context
+        }
 
-            if "spoke_expanded_from" in interaction['experiments']['direct']:
-                for se in interaction['experiments']['direct']['spoke_expanded_from']:
-                    experiment = experiment_map[se]
-                    transformed_interaction["experiments"]["direct"]["spoke_expanded_from"].append(experiment["id"])
-                    method = self.meta_data_cache["psimi"][experiment["interaction_detection_method"]]["name"]
-                    transformed_interaction["detection_method"].append(method)
-
-        if 'prediction' in interaction:
-            transformed_interaction['prediction'] = True
-
-        if 'score' in interaction:
-            if interaction['score'] != '-':
-                transformed_interaction['score'] = interaction['score']
-
-        if 'prediction' in interaction and 'experiments' in interaction:
-            transformed_interaction['type'] = 'Experimental and Predicted'
-
-        if 'prediction' in interaction and 'experiments' not in interaction:
-            transformed_interaction['type'] = 'Only Predicted'
-
-        if 'prediction' not in interaction and 'experiments' in interaction:
-            transformed_interaction['type'] = 'Only Experimental'
-
-        return transformed_interaction
-
-    def generate_network(self, biomolecules):
+    def generate_network(self, biomolecules, add_second_neighborhood=True):
         '''
         Generates the interaction network of one or more biomolecules
         Network consists of all biomolecule partners of the give biomolecule list, found in interactions
         :param biomolecules:
+        :param add_second_neighborhood:
         :return: {
                     biomolecules: list of all biomoleules
                     interactions: list of all interactions
                  }
         '''
-        core_database_connection = self.database_manager.get_primary_connection()
+        interactor_mapping = dict()
+
         # Get the 1-neighborhood of each biomolecule and derive the interactions and partners
         interactor_ids = set()
         interaction_ids = set()
@@ -122,57 +288,67 @@ class NetworkManager:
             # Add current biomolecule
             interactor_ids.add(biomolecule)
 
-            # Partners
-            interactor_ids.update(partner for partner in self.interaction_data_manager.get_neighborhood(biomolecule))
+            if biomolecule not in interactor_mapping:
+                interactor_mapping[biomolecule] = len(interactor_mapping) + 1
 
-            # Interactions
-            for partner in interactor_ids:
+            # Partners
+            partner_list = list(partner for partner in self.interaction_data_manager.get_neighborhood(biomolecule))
+            interactor_ids.update(partner_list)
+
+            # First neighborhood interactions
+            for partner in partner_list:
+                if partner not in interactor_mapping:
+                    interactor_mapping[partner] = len(interactor_mapping) + 1
+
                 sorted_partners = sorted([biomolecule, partner])
                 interaction_id = f"{sorted_partners[0]}__{sorted_partners[1]}"
                 interaction_ids.add(interaction_id)
 
-        if len(interaction_ids) > 0:
+            # Check for self interactions
+            if biomolecule in partner_list:
+                interaction_ids.add(f"{biomolecule}__{biomolecule}")
 
-            # Extract the interactors
-            interactors = list(core_database_connection["biomolecules"].find({
-                "id": {"$in": list(interactor_ids)}
-            }))
-            transformed_interactors = self.transform_interactors(interactors)
+            print(f"First neighborhood: {len(interaction_ids)}")
 
-            # Extract the interactions
-            interactions = list(core_database_connection["interactions"].find({
-                "id": {"$in": list(interaction_ids)}
-            }))
+            # If second neighrohood requested
+            second_neighborhood = set()
+            if add_second_neighborhood:
+                second_neigborhood_interactions = set()
+                for interactor_id in interactor_ids:
+                    # Build the network adjacency
+                    if interactor_id not in interactor_mapping:
+                        interactor_mapping[interactor_id] = len(interactor_mapping) + 1
 
-            # Extracts a map of experiments
-            experiment_ids = set()
-            for interaction in interactions:
-                if "experiments" in interaction:
-                    if "binary" in interaction["experiments"]["direct"]:
-                        for binary_experiments in interaction["experiments"]["direct"]["binary"]:
-                            experiment_ids.add(binary_experiments)
-                    if "spoke_expanded_from" in interaction["experiments"]["direct"]:
-                        for spoke_exapnded in interaction["experiments"]["direct"]["spoke_expanded_from"]:
-                            experiment_ids.add(spoke_exapnded)
+                    for second_neighbor in self.interaction_data_manager.get_neighborhood(interactor_id):
+                        second_neighborhood.add(second_neighbor)
 
-            experiments = dict()
-            for experiment in list(core_database_connection["experiments"].find({
-                "id": {"$in": list(experiment_ids)}
-            })):
-                del experiment["_id"]
-                experiments[experiment["id"]] = experiment
+                        # Second neighborhood interactions
+                        sorted_partners = sorted([interactor_id, second_neighbor])
+                        interaction_id = f"{sorted_partners[0]}__{sorted_partners[1]}"
+                        second_neigborhood_interactions.add(interaction_id)
 
-            transformed_interactions = list()
-            for interaction in interactions:
-                transformed_interactions.append(self.transform_interaction(interaction, experiments))
+                        if second_neighbor not in interactor_mapping:
+                            interactor_mapping[second_neighbor] = len(interactor_mapping) + 1
 
-            return {
-                'interactions': transformed_interactions,
-                'interactors': transformed_interactors
-            }
-        else:
-            return {
-                'interactions': [],
-                'interactors': []
-            }
+                print(f"Second neigbhrhood: {len(second_neighborhood)}")
+                print(f"Second neighborhood interaction {len(second_neigborhood_interactions)}")
+                interactor_ids.update(second_neighborhood)
+                interaction_ids.update(second_neigborhood_interactions)
+
+        interactor_list = self.get_interactors(interactor_ids, interactor_mapping)
+        interaction_list = self.get_interactions(interaction_ids, interactor_mapping)
+
+        context = {
+            "interactors": {value: key for key, value in interactor_mapping.items()}
+        }
+        context.update(interactor_list["context"])
+        context.update(interaction_list["context"])
+
+        return {
+            "interactors": interactor_list["interactors"],
+            "interactions": interaction_list["interactions"],
+            "biomolecules": list(map(lambda biomolecule: interactor_mapping[biomolecule], biomolecules)),
+            "context": context,
+        }
+
 
