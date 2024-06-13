@@ -320,6 +320,9 @@ class NetworkManager:
                         interactor_mapping[interactor_id] = len(interactor_mapping) + 1
 
                     for second_neighbor in self.interaction_data_manager.get_neighborhood(interactor_id):
+                        # Only consider the interactions among first neighrhoods
+                        if second_neighbor not in interactor_ids:
+                            continue
                         second_neighborhood.add(second_neighbor)
 
                         # Second neighborhood interactions
