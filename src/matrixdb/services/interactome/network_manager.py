@@ -163,7 +163,8 @@ class NetworkManager:
                 "interactions": {
                     "type": type_map,
                     "detection_method": psimi_name_mapping,
-                }
+                },
+                "experiment_mapping": experiment_map
             }
         }
 

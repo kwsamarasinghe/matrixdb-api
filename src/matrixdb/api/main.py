@@ -434,10 +434,16 @@ def get_xrefs_by_ids():
 @app.route('/api/search', methods=['GET'])
 def search_with_text_solr():
     args = request.args
-    search_text = args['text']
+    search_text = args['query']
+    search_mode = "0"
+    if "mode" in args:
+        search_mode = str(args["mode"])
 
-    biomolecules = solr_manager.query_biomolecules(search_text)
-    publications = solr_manager.query_publications(search_text)
+    biomolecules = solr_manager.search_biomolecules(search_text, search_mode)
+
+    publications = list()
+    if search_mode == "0":
+        publications = solr_manager.search_publications(search_text)
 
     return json.dumps({
         "biomolecules": biomolecules,

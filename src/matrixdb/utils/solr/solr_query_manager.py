@@ -12,7 +12,26 @@ class SolrQueryManager:
         self.biomolecules_core_url = f'{self.solr_url}/solr/biomolecules'
         self.publications_core_url = f'{self.solr_url}/solr/publications'
 
-    def query_biomolecules(self, search_query):
+        self.advanced_query_field_mappings = {
+            'id': ['biomolecule_id_exact'],
+            'name': ['recommended_name_exact'],
+            'gene': ['gene'],
+            'go': [
+                'go_names'
+            ],
+            'keywords': [
+                'keyword_names'
+            ],
+        }
+
+    def search_biomolecules(self, search_query, mode="0"):
+        if mode == "0":
+            return self.do_simple_search(search_query)
+
+        if mode == "1":
+            return self.do_advanced_search(search_query)
+
+    def do_simple_search(self, search_query):
         biomolecule_query_params = {
             'q': f'{search_query}',
             "q.op": "OR",
@@ -26,8 +45,8 @@ class SolrQueryManager:
         biomolecule_solr_docs = self.query_solr(self.biomolecules_core_url, biomolecule_query_params)
 
         # Check if the query exactly matched to id, name, common_name
-        #exact_matches = self.get_exact_matches(search_query, biomolecule_solr_docs)
-        #if len(exact_matches) > 0:
+        # exact_matches = self.get_exact_matches(search_query, biomolecule_solr_docs)
+        # if len(exact_matches) > 0:
         #    biomolecule_solr_docs = exact_matches
         # Get the 75% percentile
         if len(biomolecule_solr_docs) >= 5:
@@ -48,7 +67,7 @@ class SolrQueryManager:
         # Sort by interactions
         biomolecule_solr_docs_with_interactions = list(
             filter(lambda doc: doc['interaction_count'] > 0, biomolecule_solr_docs))
-        
+
                 if len(biomolecule_solr_docs_with_interactions) >= 100:
             biomolecule_solr_docs = sorted(biomolecule_solr_docs_with_interactions,
                                            key=lambda doc: doc['interaction_count'])[0:99]
@@ -58,7 +77,38 @@ class SolrQueryManager:
         '''
         return biomolecule_solr_docs
 
-    def query_publications(self, search_query):
+    def do_advanced_search(self, search_query):
+        if ":" not in search_query:
+            return list()
+
+        query_field = search_query[:search_query.index(":")]
+
+        if query_field not in self.advanced_query_field_mappings:
+            return []
+
+        query_parameters = search_query[search_query.index(":")+1:]
+        if "," in query_parameters:
+            query_parameters = query_parameters.split(",")
+        else:
+            query_parameters = [query_parameters]
+
+        biomolecule_query_param_string = "q=*:*&rows=1000"
+
+        query_field_mappings = self.advanced_query_field_mappings[query_field]
+        sub_fqs = []
+        for query_field_mapping in query_field_mappings:
+            field_level_fq = [f'{query_field_mapping}:"{query_parameter}"' for query_parameter in query_parameters]
+            if len(field_level_fq) > 1:
+                sub_fq = ' AND '.join(field_level_fq)
+            else:
+                sub_fq = field_level_fq[0]
+            sub_fqs.append(sub_fq)
+
+        biomolecule_query_param_string += f'&fq=({" OR ".join(sub_fqs)})'
+        biomolecule_solr_docs = self.query_solr_with_url(f'{self.biomolecules_core_url}/select?{biomolecule_query_param_string}')
+        return biomolecule_solr_docs
+
+    def search_publications(self, search_query):
 
         publication_query_params = {
             'q': f'{search_query}',
@@ -69,8 +119,7 @@ class SolrQueryManager:
         publication_solr_docs = self.query_solr(self.publications_core_url, publication_query_params)
         return sorted(publication_solr_docs, key=lambda doc: doc['interaction_count'])
 
-    @staticmethod
-    def query_solr(core_url, params):
+    def query_solr(self, core_url, params):
         """
         Perform a Solr query on the specified core with the given parameters.
 
@@ -82,6 +131,10 @@ class SolrQueryManager:
         - The Solr query response in JSON format
         """
         full_url = f"{core_url}/select?{urllib.parse.urlencode(params)}"
+        response = requests.get(full_url)
+        return response.json()["response"]["docs"]
+
+    def query_solr_with_url(self, full_url):
         response = requests.get(full_url)
         return response.json()["response"]["docs"]
 
