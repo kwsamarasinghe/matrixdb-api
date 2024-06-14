@@ -30,4 +30,7 @@ class InteractionDataManager:
         print(f"Neighborhood cache built : entries {len(self.neighborhood_cache.keys())}")
 
     def get_neighborhood(self, biomolecule):
-        return self.neighborhood_cache[biomolecule]
+        if biomolecule in self.neighborhood_cache:
+            return self.neighborhood_cache[biomolecule]
+        else:
+            return list()

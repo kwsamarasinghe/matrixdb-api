@@ -99,7 +99,7 @@ class SolrQueryManager:
         for query_field_mapping in query_field_mappings:
             field_level_fq = [f'{query_field_mapping}:"{query_parameter}"' for query_parameter in query_parameters]
             if len(field_level_fq) > 1:
-                sub_fq = ' AND '.join(field_level_fq)
+                sub_fq = ' OR '.join(field_level_fq)
             else:
                 sub_fq = field_level_fq[0]
             sub_fqs.append(sub_fq)
