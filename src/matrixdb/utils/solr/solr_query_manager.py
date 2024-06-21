@@ -56,6 +56,9 @@ class SolrQueryManager:
 
             for document in biomolecule_solr_docs:
 
+                if 'dataset' in document and document['dataset'] == 'TrEMBL':
+                    continue
+
                 if outlier_cutoff != -1:
                     if document["score"] >= outlier_cutoff:
                         document["outlier"] = True
