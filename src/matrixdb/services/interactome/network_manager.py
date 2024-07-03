@@ -1,4 +1,3 @@
-import json
 import re
 
 
@@ -32,6 +31,26 @@ class NetworkManager:
         interactors = list(core_database_connection["biomolecules"].find({
             "id": {"$in": list(interactor_ids)}
         }))
+
+        # Check for isoforms (*-1) and pro peprides (*-pro)
+        proteoform_interactors = list()
+        for interactor_id in interactor_ids:
+            if "-PRO" in interactor_id:
+                proteoform_interactors.append({
+                    "id": interactor_id,
+                    "type": "protein",
+                    "proteoform": "pro-peptide"
+                })
+
+            elif "-" in interactor_id:
+                proteoform_interactors.append({
+                    "id": interactor_id,
+                    "type": "protein",
+                    "proteoform": "isoform"
+                })
+
+        interactors.extend(proteoform_interactors)
+
         print("Interactors read")
         transformed_interactors = self.transform_interactors(interactors, interactor_mapping)
 
@@ -193,6 +212,9 @@ class NetworkManager:
                 'type': interactor['type']
             }
 
+            if 'proteoform' in interactor:
+                transformed_interactor['proteoform'] = interactor['proteoform']
+
             if 'names' in interactor:
                 if 'recommended_name' in interactor['names']:
                     transformed_interactor['name'] = interactor['names']['recommended_name']
@@ -347,7 +369,7 @@ class NetworkManager:
         }
         context.update(interactor_list["context"])
         context.update(interaction_list["context"])
-
+        print("Done generating network")
         return {
             "interactors": interactor_list["interactors"],
             "interactions": interaction_list["interactions"],

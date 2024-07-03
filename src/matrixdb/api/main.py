@@ -309,6 +309,7 @@ def get_associations_by_biomolecules():
             "interactions": []
         })
 
+
 @app.route('/api/associations/<id>', methods=['GET'])
 def get_association_by_id(id):
     core_database_connection = database_manager.get_primary_connection()
@@ -495,6 +496,7 @@ def network_request_key():
     key = ",".join([f"{value}" for value in user_data['biomolecules']])
     return f'{key}_{option}'
 
+
 @app.route('/api/network', methods=['POST'])
 @cache.cached(timeout=120, make_cache_key=network_request_key)
 def generate_network():
@@ -593,6 +595,7 @@ def get_publication_details_by_id(pubmed_id):
         publication_to_return['pages'] = publication['pages']
 
     return json.dumps(publication_to_return)
+
 
 @app.route('/api/metadata/<metadata_type>', methods=['GET'])
 @cache.cached(timeout=60)

@@ -9,7 +9,11 @@ class InteractionDataManager:
         self.neighborhood_cache = dict()
         print("Building interaction cache")
         core_database_connection = self.database_manager.get_primary_connection()
-        for interaction in core_database_connection["interactions"].find({}):
+        for interaction in core_database_connection["interactions"].find({
+            "valid": {
+                "$exists": False
+            }
+        }):
             if len(interaction["participants"]) == 2:
                 participant_0 = interaction["participants"][0]
                 participant_1 = interaction["participants"][1]
