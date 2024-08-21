@@ -1,3 +1,4 @@
+import hashlib
 import traceback
 
 from flask import Flask, request, Response
@@ -432,7 +433,14 @@ def get_xrefs_by_ids():
     return json.dumps(list(xrefs))
 
 
+def search_query_key():
+    query = request.args.get("query")
+    hash_obj = hashlib.new('sha256')
+    hash_obj.update(query.encode('utf-8'))
+    return hash_obj.hexdigest()
+
 @app.route('/api/search', methods=['GET'])
+@cache.cached(timeout=120, make_cache_key=search_query_key)
 def search_with_text_solr():
     args = request.args
     search_text = args['query']

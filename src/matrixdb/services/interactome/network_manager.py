@@ -32,7 +32,7 @@ class NetworkManager:
             "id": {"$in": list(interactor_ids)}
         }))
 
-        # Check for isoforms (*-1) and pro peprides (*-pro)
+        # Check for isoforms (*-1) and pro peptides (*-pro)
         proteoform_interactors = list()
         for interactor_id in interactor_ids:
             if "-PRO" in interactor_id:

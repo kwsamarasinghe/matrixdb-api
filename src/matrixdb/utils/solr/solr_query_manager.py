@@ -15,7 +15,7 @@ class SolrQueryManager:
         self.advanced_query_field_mappings = {
             'id': ['biomolecule_id_exact'],
             'name': ['recommended_name_exact', 'name', 'common_name'],
-            'gene': ['gene'],
+            'gene': ['exact_gene'],
             'go': [
                 'go_names'
             ],
@@ -36,18 +36,21 @@ class SolrQueryManager:
             'q': f'{search_query}',
             "q.op": "OR",
             'defType': 'dismax',
-            'qf': 'biomolecule_id^5 name^5 common_name^5 recommended_name^9 other_name^2 species^2 description^2 gene^6 chebi complex_portal go_names go_ids keyword_ids keyword_names',
-            'pf': 'name^2 recommended_name^2 go_names^1.2 common_name^2',
+            'qf': 'biomolecule_id_exact^20 biomolecule_id^8 name^8 common_name^5 recommended_name_exact^15 recommended_name^8 other_name^2 species^2 description^2 gene^2 chebi^10 complex_portal^10 go_names go_ids keyword',
+            'pf': 'name^4 recommended_name^4 go_names^4',
+            'bq': '-dataset:TrEMBL^10',
             'fl': "*,score",
-            'rows': 1000
+            'rows': 100
         }
 
         biomolecule_solr_docs = self.query_solr(self.biomolecules_core_url, biomolecule_query_params)
 
         # Check if the query exactly matched to id, name, common_name
-        # exact_matches = self.get_exact_matches(search_query, biomolecule_solr_docs)
-        # if len(exact_matches) > 0:
+        #exact_matches = self.get_exact_matches(search_query, biomolecule_solr_docs)
+        #if len(exact_matches) > 0:
         #    biomolecule_solr_docs = exact_matches
+        #    return biomolecule_solr_docs
+
         # Get the 75% percentile
         if len(biomolecule_solr_docs) >= 5:
             scores = list(b["score"] for b in biomolecule_solr_docs)
@@ -154,7 +157,6 @@ class SolrQueryManager:
         q_95 = percentile(scores, 95)
         q_5 = percentile(scores, 5)
         iqr = q_95 - q_5
-        lower_bound = q_5 - 1.5 * iqr
         upper_bound = q_95 + 1.5 * iqr
 
         outliers = [x for x in scores if x > upper_bound]
