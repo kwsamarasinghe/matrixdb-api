@@ -82,7 +82,7 @@ def get_biomolecule_by_id(id):
             go_terms.append(go)
         biomolecule["annotations"]["go"] = go_terms
 
-    if biomolecule["type"] == 'protein':
+    if biomolecule["type"] == 'protein' or biomolecule["type"] == 'multimer':
         keywords = list()
         if "annotations" in biomolecule and "keywords" in biomolecule["annotations"]:
             for keyword in biomolecule["annotations"]["keywords"]:
@@ -114,6 +114,19 @@ def get_biomolecule_by_id(id):
                                 'value': meta_data_cache["interpro"][interpro]["name"]
                             })
                 biomolecule["xrefs"]["interpro"] = interpro_terms
+
+        '''
+        if "xrefs" in biomolecule and "reactome" in biomolecule["xrefs"]:
+            if biomolecule["xrefs"]["reactome"]:
+                reactome_terms = list()
+                for reactome in biomolecule["xrefs"]["reactome"]:
+                        if reactome in meta_data_cache["reactome"]:
+                            reactome_terms.append({
+                                'id': meta_data_cache["reactome"][reactome]["id"],
+                                'value': meta_data_cache["reactome"][reactome]["name"]
+                            })
+                biomolecule["xrefs"]["reactome"] = reactome_terms
+        '''
 
     return Response(json.dumps(biomolecule), mimetype='application/json')
 
@@ -246,6 +259,40 @@ def get_protein_expression():
         }
     return expression_data
 
+
+@app.route('/api/biomolecules/<id>/binding-regions', methods=['GET'])
+def get_binding_by_id(id):
+    core_database_connection = database_manager.get_primary_connection()
+    interactions = core_database_connection["interactions"].find({"participants": id})
+
+    # Experiment ids
+    experiment_ids = set()
+    for interaction in interactions:
+        if "experiments" not in interaction:
+            continue
+
+        if len(interaction["experiments"]["direct"]["binary"]) > 0:
+            for e in interaction["experiments"]["direct"]["binary"]:
+                experiment_ids.add(e)
+        if len(interaction["experiments"]["direct"]["spoke_expanded_from"]) > 0:
+            for e in interaction["experiments"]["direct"]["spoke_expanded_from"]:
+                experiment_ids.add(e)
+
+    experiments = core_database_connection["experiments"].find({"id": {
+        "$in": list(experiment_ids)
+    }})
+
+    mapping_regions = list()
+    for experiment in experiments:
+        for participant in experiment["participants"]:
+            for feature in participant["features"]:
+                if feature["feature_name"] == "binding-associated region" or feature["feature_name"] == "sufficient binding region" or feature["feature_name"] == "direct binding region":
+                        if "(" in feature["featur_value"]:
+                            feature_value = feature["featur_value"].split("(")[0]
+                            feature["featur_value"] = feature_value
+                        mapping_regions.append(feature)
+
+    return mapping_regions
 
 @app.route('/api/associations/', methods=['POST'])
 def get_associations_by_biomolecules():
