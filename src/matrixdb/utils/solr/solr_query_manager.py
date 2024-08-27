@@ -22,6 +22,10 @@ class SolrQueryManager:
             'keywords': [
                 'keyword_names'
             ],
+            'matrixdb_ecm': ['matrixdb_ecm'],
+            'matrisome_category': ['matrisome_category'],
+            'matrisome_division': ['matrisome_division'],
+            'species': ['species'],
         }
 
     def search_biomolecules(self, search_query, mode="0"):
@@ -83,34 +87,62 @@ class SolrQueryManager:
         '''
         return biomolecule_solr_docs
 
+    def parse_advanced_query(self, query_part):
+        parsed_query_part = {
+            "field": query_part[:query_part.index(':')].strip(),
+        }
+
+        query_values = query_part[query_part.index(":") + 1:].strip()
+        if "," in query_values:
+            query_values = query_values.split(",")
+        else:
+            query_values = [query_values]
+
+        parsed_query_part["values"] = query_values
+        return parsed_query_part
+
     def do_advanced_search(self, search_query):
         if ":" not in search_query:
             return list()
 
-        query_field = search_query[:search_query.index(":")]
+        # Check if it has conjunction AND
+        parsed_query = []
+        if "and" in search_query.lower():
+            query_parts = search_query.split("and")
+            if len(query_parts) > 2:
+                return []
 
-        if query_field not in self.advanced_query_field_mappings:
-            return []
-
-        query_parameters = search_query[search_query.index(":")+1:]
-        if "," in query_parameters:
-            query_parameters = query_parameters.split(",")
+            for query_part in query_parts:
+                parsed_query.append(self.parse_advanced_query(query_part))
         else:
-            query_parameters = [query_parameters]
+            parsed_query.append(self.parse_advanced_query(search_query))
+
+        #for query_field in query_fields:
+        #    if query_field not in self.advanced_query_field_mappings:
+        #        return []
 
         biomolecule_query_param_string = "q=*:*&rows=1000"
 
-        query_field_mappings = self.advanced_query_field_mappings[query_field]
-        sub_fqs = []
-        for query_field_mapping in query_field_mappings:
-            field_level_fq = [f'{query_field_mapping}:"{query_parameter}"' for query_parameter in query_parameters]
-            if len(field_level_fq) > 1:
-                sub_fq = ' OR '.join(field_level_fq)
-            else:
-                sub_fq = field_level_fq[0]
-            sub_fqs.append(sub_fq)
+        fq = []
+        for parsed_query_part in parsed_query:
+            query_field = parsed_query_part["field"]
+            query_parameters = parsed_query_part["values"]
 
-        biomolecule_query_param_string += f'&fq=({" OR ".join(sub_fqs)})'
+            if query_field not in self.advanced_query_field_mappings:
+                return []
+
+            query_field_mappings = self.advanced_query_field_mappings[query_field]
+            sub_fqs = []
+            for query_field_mapping in query_field_mappings:
+                field_level_fq = [f'{query_field_mapping}:"{query_parameter}"' for query_parameter in query_parameters]
+                if len(field_level_fq) > 1:
+                    sub_fq = ' OR '.join(field_level_fq)
+                else:
+                    sub_fq = field_level_fq[0]
+                sub_fqs.append(sub_fq)
+            fq.append(f'({" OR ".join(sub_fqs)})')
+
+        biomolecule_query_param_string += f'&fq=({" AND ".join(fq)})'
         biomolecule_solr_docs = self.query_solr_with_url(f'{self.biomolecules_core_url}/select?{biomolecule_query_param_string}')
         return biomolecule_solr_docs
 
