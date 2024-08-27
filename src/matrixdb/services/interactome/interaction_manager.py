@@ -1,3 +1,5 @@
+import re
+
 
 class InteractionDataManager:
 
@@ -33,8 +35,18 @@ class InteractionDataManager:
 
         print(f"Neighborhood cache built : entries {len(self.neighborhood_cache.keys())}")
 
+    def is_proteoform_id(self, biomolecule, biomolecule_form):
+            # Create a regex pattern to match x or x-*
+            pattern = rf'^{biomolecule}(-\w+)?$'
+
+            # Check if y matches the pattern
+            return bool(re.match(pattern, biomolecule_form))
+
     def get_neighborhood(self, biomolecule):
-        if biomolecule in self.neighborhood_cache:
-            return self.neighborhood_cache[biomolecule]
-        else:
-            return list()
+        biomolecule_forms = self.neighborhood_cache.keys()
+        relevant_biomolecule_forms = list(filter(lambda b: self.is_proteoform_id(biomolecule,b), biomolecule_forms))
+        neighborhood = dict()
+        for biomolecule_form in relevant_biomolecule_forms:
+            if biomolecule_form in self.neighborhood_cache:
+                neighborhood[biomolecule_form] = self.neighborhood_cache[biomolecule_form]
+        return neighborhood

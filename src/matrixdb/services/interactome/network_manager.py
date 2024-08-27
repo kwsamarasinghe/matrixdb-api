@@ -100,7 +100,7 @@ class NetworkManager:
         ]):
             transformed_interaction = {
                 "id": interaction["id"],
-                "participants": list(interactor_mapping[participant] for participant in interaction["participants"]),
+                "participants": [interactor_mapping[participant] for participant in interaction["participants"] if participant in interactor_mapping],
                 "experiments": {
                     "direct": {
                         "binary": list(),
@@ -315,17 +315,21 @@ class NetworkManager:
                 interactor_mapping[biomolecule] = len(interactor_mapping) + 1
 
             # Partners
-            partner_list = list(partner for partner in self.interaction_data_manager.get_neighborhood(biomolecule))
-            interactor_ids.update(partner_list)
+            neighborhood = self.interaction_data_manager.get_neighborhood(biomolecule)
+            for biomolecule_form in neighborhood:
+                partner_list = neighborhood[biomolecule_form]
+                interactor_ids.update(partner_list)
 
             # First neighborhood interactions
-            for partner in partner_list:
-                if partner not in interactor_mapping:
-                    interactor_mapping[partner] = len(interactor_mapping) + 1
+            for biomolecule_form in neighborhood:
+                partner_list = neighborhood[biomolecule_form]
+                for partner in partner_list:
+                    if partner not in interactor_mapping:
+                        interactor_mapping[partner] = len(interactor_mapping) + 1
 
-                sorted_partners = sorted([biomolecule, partner])
-                interaction_id = f"{sorted_partners[0]}__{sorted_partners[1]}"
-                interaction_ids.add(interaction_id)
+                    sorted_partners = sorted([biomolecule_form, partner])
+                    interaction_id = f"{sorted_partners[0]}__{sorted_partners[1]}"
+                    interaction_ids.add(interaction_id)
 
             # Check for self interactions
             if biomolecule in partner_list:
@@ -342,19 +346,21 @@ class NetworkManager:
                     if interactor_id not in interactor_mapping:
                         interactor_mapping[interactor_id] = len(interactor_mapping) + 1
 
-                    for second_neighbor in self.interaction_data_manager.get_neighborhood(interactor_id):
-                        # Only consider the interactions among first neighrhoods
-                        if second_neighbor not in interactor_ids:
-                            continue
-                        second_neighborhood.add(second_neighbor)
+                    neighborhood = self.interaction_data_manager.get_neighborhood(interactor_id)
+                    for biomolecule_form in neighborhood:
+                        for second_neighbor in neighborhood[biomolecule_form]:
+                            # Only consider the interactions among first neighrhoods
+                            if second_neighbor not in interactor_ids:
+                                continue
+                            second_neighborhood.add(second_neighbor)
 
-                        # Second neighborhood interactions
-                        sorted_partners = sorted([interactor_id, second_neighbor])
-                        interaction_id = f"{sorted_partners[0]}__{sorted_partners[1]}"
-                        second_neigborhood_interactions.add(interaction_id)
+                            # Second neighborhood interactions
+                            sorted_partners = sorted([interactor_id, second_neighbor])
+                            interaction_id = f"{sorted_partners[0]}__{sorted_partners[1]}"
+                            second_neigborhood_interactions.add(interaction_id)
 
-                        if second_neighbor not in interactor_mapping:
-                            interactor_mapping[second_neighbor] = len(interactor_mapping) + 1
+                            if second_neighbor not in interactor_mapping:
+                                interactor_mapping[second_neighbor] = len(interactor_mapping) + 1
 
                 print(f"Second neigbhrhood: {len(second_neighborhood)}")
                 print(f"Second neighborhood interaction {len(second_neigborhood_interactions)}")
