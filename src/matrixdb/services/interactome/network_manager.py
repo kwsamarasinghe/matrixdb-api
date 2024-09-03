@@ -307,6 +307,7 @@ class NetworkManager:
         interactor_ids = set()
         interaction_ids = set()
 
+        biomolecules_list = list()
         for biomolecule in biomolecules:
             # Add current biomolecule
             interactor_ids.add(biomolecule)
@@ -314,11 +315,14 @@ class NetworkManager:
             if biomolecule not in interactor_mapping:
                 interactor_mapping[biomolecule] = len(interactor_mapping) + 1
 
+            biomolecules_list.append(interactor_mapping[biomolecule])
+
             # Partners
             neighborhood = self.interaction_data_manager.get_neighborhood(biomolecule)
             for biomolecule_form in neighborhood:
                 partner_list = neighborhood[biomolecule_form]
                 interactor_ids.update(partner_list)
+                interactor_ids.add(biomolecule_form)
 
             # First neighborhood interactions
             for biomolecule_form in neighborhood:
@@ -330,6 +334,11 @@ class NetworkManager:
                     sorted_partners = sorted([biomolecule_form, partner])
                     interaction_id = f"{sorted_partners[0]}__{sorted_partners[1]}"
                     interaction_ids.add(interaction_id)
+
+                if biomolecule_form not in interactor_mapping:
+                    interactor_mapping[biomolecule_form] = len(interactor_mapping) + 1
+
+                biomolecules_list.append(interactor_mapping[biomolecule_form])
 
             # Check for self interactions
             if biomolecule in partner_list:
@@ -376,10 +385,38 @@ class NetworkManager:
         context.update(interactor_list["context"])
         context.update(interaction_list["context"])
         print("Done generating network")
+
+        # Participant count is calculated with following rule
+        # take all completely external partners, note that, there could be multiple interactions with same parnter
+        # due to isoforms in proteins  a-b, a-b1, but we only count it once
+        # for all self interactions with or without isoforms will also count as one parnter
+        partner_count = set()
+        biomolecule_ids = list(context["interactors"]["interactor_mapping"][biomol] for biomol in biomolecules_list)
+        for interaction in interaction_list["interactions"]:
+            p1 = interaction['id'].split('__')[0]
+            p2 = interaction['id'].split('__')[1]
+
+            if p1 not in biomolecule_ids:
+                partner_count.add(p1)
+
+            if p2 not in biomolecule_ids:
+                partner_count.add(p2)
+
+            if p1 in biomolecule_ids or p2 in biomolecule_ids:
+                if '-' in p1:
+                    p1 = p1.split('-')[0]
+
+                if '-' in p2:
+                    p2 = p2.split('-')[0]
+
+                if p1 == p2:
+                    partner_count.add(p1)
+
         return {
+            "partnerCount": len(partner_count),
             "interactors": interactor_list["interactors"],
             "interactions": interaction_list["interactions"],
-            "biomolecules": list(map(lambda biomolecule: interactor_mapping[biomolecule], biomolecules)),
+            "biomolecules": biomolecules_list,
             "context": context,
         }
 
