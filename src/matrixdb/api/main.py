@@ -115,18 +115,17 @@ def get_biomolecule_by_id(id):
                             })
                 biomolecule["xrefs"]["interpro"] = interpro_terms
 
-        '''
-        if "xrefs" in biomolecule and "reactome" in biomolecule["xrefs"]:
+        if biomolecule["type"] == 'multimer' and "xrefs" in biomolecule and "reactome" in biomolecule["xrefs"]:
             if biomolecule["xrefs"]["reactome"]:
                 reactome_terms = list()
                 for reactome in biomolecule["xrefs"]["reactome"]:
-                        if reactome in meta_data_cache["reactome"]:
+                        if reactome["id"] in meta_data_cache["reactome"]:
+                            reactome_data = meta_data_cache["reactome"][reactome["id"]]
                             reactome_terms.append({
-                                'id': meta_data_cache["reactome"][reactome]["id"],
-                                'value': meta_data_cache["reactome"][reactome]["name"]
+                                'id': reactome_data["id"],
+                                'value': reactome_data["term"].strip('"')
                             })
                 biomolecule["xrefs"]["reactome"] = reactome_terms
-        '''
 
     return Response(json.dumps(biomolecule), mimetype='application/json')
 

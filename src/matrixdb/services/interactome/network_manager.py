@@ -397,11 +397,9 @@ class NetworkManager:
             p2 = interaction['id'].split('__')[1]
             print(interaction["id"])
             if p1 not in biomolecule_ids:
-                print(f"adding {p1}")
                 partner_count.add(p1)
 
             if p2 not in biomolecule_ids:
-                print(f"adding {p2}")
                 partner_count.add(p2)
 
             if p1 in biomolecule_ids or p2 in biomolecule_ids:
@@ -412,7 +410,6 @@ class NetworkManager:
                     p2 = p2.split('-')[0]
 
                 if p1 == p2:
-                    print(f"self {p1}")
                     partner_count.add(p1)
 
         return {

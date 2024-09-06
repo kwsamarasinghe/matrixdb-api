@@ -11,7 +11,8 @@ class CacheManager:
             "uniprotKeywords": dict(),
             "uberon": dict(),
             "bto": dict(),
-            "ncbiTaxonomy": dict()
+            "ncbiTaxonomy": dict(),
+            "reactome": dict()
         }
         self.app_config = app_config
         self.database_manager = database_manager
@@ -51,6 +52,11 @@ class CacheManager:
         for ncbi in core_database_connection["ncbiTaxonomy"].find():
             del ncbi["_id"]
             self.meta_data_cache["ncbiTaxonomy"][ncbi["id"]] = ncbi
+
+        # Reactome
+        for reactome in core_database_connection["reactome"].find():
+            del reactome["_id"]
+            self.meta_data_cache["reactome"][reactome["id"]] = reactome
 
         print("Cache manager initialized")
 

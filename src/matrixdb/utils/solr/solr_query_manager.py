@@ -23,9 +23,10 @@ class SolrQueryManager:
                 'keyword_names'
             ],
             'matrixdb_ecm': ['matrixdb_ecm'],
+            'matrisome_subcategory': ['matrisome_subcategory'],
             'matrisome_category': ['matrisome_category'],
-            'matrisome_division': ['matrisome_division'],
             'species': ['species'],
+            'reactome': ['reactome']
         }
 
     def search_biomolecules(self, search_query, mode="0"):
