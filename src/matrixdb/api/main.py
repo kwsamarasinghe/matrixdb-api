@@ -285,14 +285,16 @@ def get_binding_by_id(id):
     mapping_regions = list()
     for experiment in experiments:
         for participant in experiment["participants"]:
-            for feature in participant["features"]:
-                if feature["feature_name"] == "binding-associated region" or feature["feature_name"] == "sufficient binding region" or feature["feature_name"] == "direct binding region":
-                        if "(" in feature["featur_value"]:
-                            feature_value = feature["featur_value"].split("(")[0]
-                            feature["featur_value"] = feature_value
-                        mapping_regions.append(feature)
+            if participant['id'] == id:
+                for feature in participant["features"]:
+                    if feature["feature_name"] == "binding-associated region" or feature["feature_name"] == "sufficient binding region" or feature["feature_name"] == "direct binding region":
+                            if "(" in feature["featur_value"]:
+                                feature_value = feature["featur_value"].split("(")[0]
+                                feature["featur_value"] = feature_value
+                            mapping_regions.append(feature)
 
     return mapping_regions
+
 
 @app.route('/api/associations/', methods=['POST'])
 def get_associations_by_biomolecules():
@@ -407,10 +409,10 @@ def get_experiments_by_id(id):
                     'id': meta_data_cache['psimi'][participant['experimental_role']]['id'],
                     'name': meta_data_cache['psimi'][participant['experimental_role']]['name']
                 }
-            if 'participant_detection_method' in participant:
+            if 'identification_method' in participant:
                 participant['participant_detection_method'] = {
-                    'id': meta_data_cache['psimi'][participant['participant_detection_method']]['id'],
-                    'name': meta_data_cache['psimi'][participant['participant_detection_method']]['name']
+                    'id': meta_data_cache['psimi'][participant['identification_method']]['id'],
+                    'name': meta_data_cache['psimi'][participant['identification_method']]['name']
                 }
 
         experiments['source'] = {
@@ -485,6 +487,7 @@ def search_query_key():
     hash_obj = hashlib.new('sha256')
     hash_obj.update(query.encode('utf-8'))
     return hash_obj.hexdigest()
+
 
 @app.route('/api/search', methods=['GET'])
 @cache.cached(timeout=120, make_cache_key=search_query_key)
