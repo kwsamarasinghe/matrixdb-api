@@ -8,6 +8,7 @@ import json
 from itertools import groupby
 
 from gevent.pywsgi import WSGIServer
+import requests as requests
 
 from src.matrixdb.services.biomolecules.protein_data_manager import ProteinDataManager
 from src.matrixdb.services.interactome.interaction_manager import InteractionDataManager
@@ -26,7 +27,8 @@ app_config = {
     "database_url": os.getenv('DATABASE_URL'),
     "primary_database_name": os.getenv("PRIMARY_DATABASE_NAME"),
     "secondary_database_name": os.getenv("SECONDARY_DATABASE_NAME"),
-    "solr_url": os.getenv('SOLR_URL')
+    "solr_url": os.getenv('SOLR_URL'),
+    "pdb_api_url": os.getenv('PDB_API_URL'),
 }
 
 config = {
@@ -262,6 +264,56 @@ def get_protein_expression():
 @app.route('/api/biomolecules/<id>/binding-regions', methods=['GET'])
 def get_binding_by_id(id):
     core_database_connection = database_manager.get_primary_connection()
+
+    # Get pdb to uniprot mapping
+    biomolecule = core_database_connection["biomolecules"].find_one({
+        'id': id
+    })
+    pdb_entities = dict()
+    for pdb in biomolecule['molecular_details']['pdb']:
+        if "properties" in pdb:
+            for prop in pdb["properties"]:
+                if prop["type"] == "chains":
+                    chain_names = prop["value"].split('=')[0]
+
+                    if '/' in chain_names:
+                        chain_names = chain_names.split('/')
+                    else:
+                        chain_names = [chain_names]
+
+                    for chain_name in chain_names:
+                        chain_start = prop["value"].split('=')[1].split('-')[0]
+                        chain_end = prop["value"].split('=')[1].split('-')[1]
+                        if pdb['id'] not in pdb_entities:
+                            pdb_entities[pdb['id']] = list()
+
+                        pdb_entities[pdb['id']].append({
+                            'chain': chain_name,
+                            'start': chain_start,
+                            'end': chain_end
+                        })
+
+    # Get the pdb to uniprot mapping
+    try:
+        response = requests.get(f'{app_config["pdb_api_url"]}/{id}', timeout=20)
+        pdb_response = response.json()
+        if "mappings" in pdb_response[id]:
+            pdb_mappings = pdb_response[id]["mappings"]
+            for pdb_mapping in pdb_mappings:
+                pdb_id = pdb_mapping['entry_id']
+                for segment in pdb_mapping['segments']:
+                    for chain in segment["chains"]:
+                        if pdb_id.upper() in pdb_entities:
+                            for pdb_chain in pdb_entities[pdb_id.upper()]:
+                                if chain == pdb_chain['chain']:
+                                    pdb_chain['pdb_start'] = segment['pdb_start']
+                                    pdb_chain['pdb_end'] = segment['pdb_end']
+                                    pdb_chain['unp_start'] = segment['unp_start']
+                                    pdb_chain['unp_end'] = segment['unp_end']
+
+    except requests.exceptions.Timeout:
+        print("No pdb to uniprot mapping retrieved")
+
     interactions = core_database_connection["interactions"].find({"participants": id})
 
     # Experiment ids
@@ -286,13 +338,38 @@ def get_binding_by_id(id):
         for participant in experiment["participants"]:
             if participant['id'] == id:
                 for feature in participant["features"]:
-                    if feature["feature_name"] == "binding-associated region" or feature["feature_name"] == "sufficient binding region" or feature["feature_name"] == "direct binding region":
-                            if "(" in feature["featur_value"]:
-                                feature_value = feature["featur_value"].split("(")[0]
-                                feature["featur_value"] = feature_value
-                            mapping_regions.append(feature)
+                    if (feature["feature_name"] == "binding-associated region" or
+                            feature["feature_name"] == "sufficient binding region" or
+                            feature["feature_name"] == "direct binding region"):
+                        if "(" in feature["featur_value"]:
+                            feature_value = feature["featur_value"].split("(")[0]
+                        else:
+                            feature_value = feature["featur_value"]
+                        if '..' in feature_value:
+                            feature_value = feature_value.split('..')[1]
+                        feature["featur_value"] = feature_value
+                        mapping_regions.append(feature)
 
-    return mapping_regions
+    for pdb_id in pdb_entities:
+        pdb_chains = pdb_entities[pdb_id]
+        for chain in pdb_chains:
+            for mapping_region in mapping_regions:
+                feature_value = mapping_region['featur_value']
+                region_start = feature_value.split('-')[0]
+                region_end = feature_value.split('-')[1]
+
+                if region_start == '?' or region_end == '?':
+                    continue
+
+                if int(chain['unp_start']) <= int(region_start) and int(region_end) <= int(chain['unp_end']):
+                    if 'mapping_regions' not in chain:
+                        chain['binding_regions'] = list()
+
+                    chain['binding_regions'].append({
+                        'region_start': region_start,
+                        'region_end': region_end
+                    })
+    return pdb_entities
 
 
 @app.route('/api/associations/', methods=['POST'])

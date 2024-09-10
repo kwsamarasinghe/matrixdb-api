@@ -308,6 +308,7 @@ class NetworkManager:
         interaction_ids = set()
 
         biomolecules_list = list()
+        partner_list = None
         for biomolecule in biomolecules:
             # Add current biomolecule
             interactor_ids.add(biomolecule)
@@ -341,7 +342,7 @@ class NetworkManager:
                 biomolecules_list.append(interactor_mapping[biomolecule_form])
 
             # Check for self interactions
-            if biomolecule in partner_list:
+            if partner_list != None and biomolecule in partner_list:
                 interaction_ids.add(f"{biomolecule}__{biomolecule}")
 
             print(f"First neighborhood: {len(interaction_ids)}")
