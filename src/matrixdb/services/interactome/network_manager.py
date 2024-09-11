@@ -396,7 +396,7 @@ class NetworkManager:
         for interaction in interaction_list["interactions"]:
             p1 = interaction['id'].split('__')[0]
             p2 = interaction['id'].split('__')[1]
-            print(interaction["id"])
+            #print(interaction["id"])
             if p1 not in biomolecule_ids:
                 partner_count.add(p1)
 

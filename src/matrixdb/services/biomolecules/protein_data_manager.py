@@ -73,7 +73,7 @@ class ProteinDataManager:
 
     def get_proteomics_expressions(self, protein_id):
         secondary_database_connection = self.database_manager.get_secondary_connection()
-        proteomics_expression_by_protein = secondary_database_connection["proteomicsExpression"].find_one({
+        proteomics_expression_by_protein = secondary_database_connection["proteomicsExpressions"].find_one({
             "uniprot": protein_id
         })
 
@@ -87,14 +87,14 @@ class ProteinDataManager:
                             "tissue": tissue_name,
                             "sampleName": expression["sampleName"] if "sampleName" in expression else "",
                             "sample": expression["sample"] if "sample" in expression else "",
-                            "score": expression["confidenceScore"] if "confidenceScore" in expression else 0
+                            "score": expression["nsaf"] if "nsaf" in expression else 0
                         })
 
         return prot_expressions
 
     def get_proteomics_expressions_for_proteins(self, protein_ids):
         secondary_database_connection = self.database_manager.get_secondary_connection()
-        proteomics_expression_by_proteins = secondary_database_connection["proteomicsExpression"].find({
+        proteomics_expression_by_proteins = secondary_database_connection["proteomicsExpressions"].find({
             "uniprot": {
                 '$in': protein_ids
             }
@@ -113,7 +113,7 @@ class ProteinDataManager:
                                 "tissue": tissue_name,
                                 "sampleName": expression["sampleName"] if "sampleName" in expression else "",
                                 "sample": expression["sample"] if "sample" in expression else "",
-                                "score": expression["confidenceScore"] if "confidenceScore" in expression else 0,
+                                "score": expression["nsaf"] if "nsaf" in expression else 0,
                             })
 
         return prot_expressions

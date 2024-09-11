@@ -355,6 +355,8 @@ def get_binding_by_id(id):
         for chain in pdb_chains:
             for mapping_region in mapping_regions:
                 feature_value = mapping_region['featur_value']
+                if '?' in feature_value: continue
+                if '-' not in feature_value: continue
                 region_start = feature_value.split('-')[0]
                 region_end = feature_value.split('-')[1]
 
