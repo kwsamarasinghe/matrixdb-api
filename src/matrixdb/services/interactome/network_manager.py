@@ -36,18 +36,31 @@ class NetworkManager:
         proteoform_interactors = list()
         for interactor_id in interactor_ids:
             if "-PRO" in interactor_id:
-                proteoform_interactors.append({
-                    "id": interactor_id,
-                    "type": "protein",
-                    "proteoform": "pro-peptide"
+                protein_id = interactor_id.split("-PRO")[0]
+                protein = core_database_connection["biomolecules"].find_one({
+                    'id': protein_id
                 })
+                protein["id"] = interactor_id
+                proteoform_interactors.append(protein)
+                #proteoform_interactors.append({
+                #    "id": interactor_id,
+                #    "name": protein[""]
+                #    "type": "protein",
+                #    "proteoform": "pro-peptide"
+                #})
 
             elif "-" in interactor_id:
-                proteoform_interactors.append({
-                    "id": interactor_id,
-                    "type": "protein",
-                    "proteoform": "isoform"
+                protein_id = interactor_id.split("-")[0]
+                protein = core_database_connection["biomolecules"].find_one({
+                    'id': protein_id
                 })
+                protein["id"] = interactor_id
+                proteoform_interactors.append(protein)
+                #proteoform_interactors.append({
+                #    "id": interactor_id,
+                #    "type": "protein",
+                #    "proteoform": "isoform"
+                #})
 
         interactors.extend(proteoform_interactors)
 
@@ -396,7 +409,7 @@ class NetworkManager:
         for interaction in interaction_list["interactions"]:
             p1 = interaction['id'].split('__')[0]
             p2 = interaction['id'].split('__')[1]
-            #print(interaction["id"])
+
             if p1 not in biomolecule_ids:
                 partner_count.add(p1)
 
