@@ -14,6 +14,7 @@ class SolrQueryManager:
 
         self.advanced_query_field_mappings = {
             'id': ['biomolecule_id_exact'],
+            'uniprot': ['biomolecule_id_exact'],
             'name': ['recommended_name_exact', 'name', 'common_name'],
             'gene': ['exact_gene'],
             'go': [
