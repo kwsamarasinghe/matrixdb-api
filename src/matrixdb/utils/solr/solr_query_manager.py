@@ -24,8 +24,8 @@ class SolrQueryManager:
                 'keyword_names'
             ],
             'matrixdb_ecm': ['matrixdb_ecm'],
-            'matrisome_subcategory': ['matrisome_subcategory'],
-            'matrisome_category': ['matrisome_category'],
+            'matrisome_category': ['matrisome_subcategory'],
+            'matrisome_division': ['matrisome_category'],
             'species': ['species'],
             'reactome': ['reactome']
         }
