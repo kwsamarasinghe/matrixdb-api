@@ -126,3 +126,13 @@ class ProteinDataManager:
         if "UBERON" in expression_data["tissueId"]:
             if expression_data['tissueId'] in self.meta_data_cache["uberon"]:
                 return self.meta_data_cache["uberon"][expression_data["tissueId"]]["name"]
+
+    def get_gene_name(self, protein_id):
+        primary_connection = self.database_manager.get_primary_connection()
+        protein = primary_connection['biomolecules'].find_one({
+            'id': protein_id
+        })
+        if type(protein['relations']['gene_name']) is list:
+            return protein['relations']['gene_name'][0]
+        else:
+            return protein['relations']['gene_name']

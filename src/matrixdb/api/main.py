@@ -254,7 +254,9 @@ def get_biomolecule_interactors_by_id(id):
 def get_protein_expression():
     expression_data = dict()
     for protein in json.loads(request.data):
+        gene = protein_data_manager.get_gene_name(protein)
         expression_data[protein] = {
+            'gene': gene,
             'geneExpression': protein_data_manager.get_gene_expressions(protein),
             'proteomicsExpression': protein_data_manager.get_proteomics_expressions(protein)
         }
