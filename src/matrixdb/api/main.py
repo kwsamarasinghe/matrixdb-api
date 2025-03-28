@@ -16,6 +16,7 @@ from src.matrixdb.services.interactome.network_manager import NetworkManager
 from src.matrixdb.utils.cache.cache_manager import CacheManager
 from src.matrixdb.utils.database.database_manager import DatabaseManager
 from src.matrixdb.utils.solr.solr_query_manager import SolrQueryManager
+from src.matrixdb.utils.psicquic.psicquic_manager import getTotalResults
 
 from dotenv import load_dotenv
 import os
@@ -745,6 +746,29 @@ def get_meta_data(metadata_type):
             meta_data_response['ncbi'] = meta_data['ncbiTaxonomy']
 
     return meta_data_response
+
+@app.route('/api/statistics/psicquic/<biomolecule_id>', methods=['GET'])
+@cache.cached(timeout=60)
+def get_psicquic_statistics(biomolecule_id):
+    # Check the biomolecule
+    core_database_connection = database_manager.get_primary_connection()
+    biomolecule = core_database_connection["biomolecules"].find_one(
+        {"id": biomolecule_id},
+        {"_id": False}
+    )
+
+    if biomolecule['type'] == 'gag' or biomolecule['type'] == 'smallmol' or biomolecule['type'] == 'lipid':
+        query_id = biomolecule['xrefs']['chebi']
+    if biomolecule['type'] == 'multimer':
+        query_id = biomolecule['xrefs']['complex_portal']
+    if biomolecule['type'] == 'pfrag':
+        query_id = biomolecule['xrefs']['uniprot']
+    if biomolecule['type'] == 'protein':
+        query_id = biomolecule_id
+
+    total = getTotalResults(query_id)
+
+    return Response(total, mimetype='application/json')
 
 
 if __name__ == '__main__':
