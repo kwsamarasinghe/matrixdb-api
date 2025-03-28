@@ -107,7 +107,8 @@ def getTotalResults(query):
     # Return results as a JSON response
     result = {
         'interactions': total_results,
-        'successful_services': successful_queries
+        'successful_services': successful_queries,
+        'xref': f'http://www.ebi.ac.uk/Tools/webservices/psicquic/view/main.xhtml?query={query}'
     }
     
     return json.dumps(result)
